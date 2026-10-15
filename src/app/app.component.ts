@@ -19,6 +19,7 @@ import { AuthService } from './services/auth.service';
 import { BudgetStateService } from './services/budget-state.service';
 import { DueNotificationService } from './services/due-notification.service';
 import { PhpPipe } from './shared/php.pipe';
+import { ThemeToggleComponent } from './shared/theme-toggle.component';
 
 @Component({
   selector: 'app-root',
@@ -40,6 +41,7 @@ import { PhpPipe } from './shared/php.pipe';
     LucideMenu,
     LucideX,
     AuthComponent,
+    ThemeToggleComponent,
   ],
   template: `
     @if (!auth.ready() || (auth.user() && !budget.loaded())) {
@@ -58,6 +60,7 @@ import { PhpPipe } from './shared/php.pipe';
         <span class="text-lg font-bold tracking-tight">Cashy</span>
       </a>
       <div class="flex items-center gap-2">
+        <app-theme-toggle />
         <button type="button" class="grid h-10 w-10 place-items-center rounded-full border border-white/10 text-slate-200" [attr.aria-label]="menuOpen() ? 'Close menu' : 'Open menu'" [attr.aria-expanded]="menuOpen()" (click)="toggleMenu()">
           @if (menuOpen()) {
             <svg lucideX [size]="18"></svg>
@@ -88,14 +91,17 @@ import { PhpPipe } from './shared/php.pipe';
             <span class="mt-1 block text-xs text-slate-400">Cash flow & Finance Planner</span>
           </span>
         </a>
-        <button type="button" class="relative grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 text-amber-200" aria-label="Notifications" [attr.aria-expanded]="notificationsOpen()" (click)="toggleNotifications()">
+        <div class="flex shrink-0 gap-2">
+          <app-theme-toggle />
+          <button type="button" class="relative grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 text-amber-200" aria-label="Notifications" [attr.aria-expanded]="notificationsOpen()" (click)="toggleNotifications()">
           <svg lucideBell [size]="18"></svg>
           @if (alertCount()) {
             <span class="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-amber-400 px-1 text-[11px] font-bold text-slate-950">
               {{ alertCount() }}
             </span>
           }
-        </button>
+          </button>
+        </div>
       </div>
 
       <nav class="mt-8 flex flex-1 flex-col gap-1" aria-label="Primary">

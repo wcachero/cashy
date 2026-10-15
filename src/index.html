@@ -17,6 +17,11 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@450;560&family=Outfit:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      try {
+        if (localStorage.getItem('cashy_theme') === 'light') document.documentElement.dataset.theme = 'light';
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <app-root></app-root>

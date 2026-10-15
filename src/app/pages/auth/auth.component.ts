@@ -3,19 +3,24 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { AuthService } from '../../services/auth.service';
 import { BudgetStateService } from '../../services/budget-state.service';
+import { ThemeToggleComponent } from '../../shared/theme-toggle.component';
 
 @Component({
   selector: 'app-auth',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [ThemeToggleComponent],
   template: `
     <main class="grid min-h-screen place-items-center px-4 py-10">
       <section class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl shadow-black/30">
-        <div class="flex items-center gap-3">
-          <span class="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-400 text-xl font-extrabold text-slate-950">₱</span>
-          <div>
-            <p class="text-lg font-bold leading-none">Cashy</p>
-            <p class="mt-1 text-xs text-slate-400">Cash flow & Finance Planner</p>
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-400 text-xl font-extrabold text-slate-950">₱</span>
+            <div>
+              <p class="text-lg font-bold leading-none">Cashy</p>
+              <p class="mt-1 text-xs text-slate-400">Cash flow & Finance Planner</p>
+            </div>
           </div>
+          <app-theme-toggle />
         </div>
         <h1 class="mt-6 text-2xl font-extrabold tracking-tight">{{ mode() === 'login' ? 'Sign in' : 'Create an account' }}</h1>
         <p class="mt-2 text-sm text-slate-400">
