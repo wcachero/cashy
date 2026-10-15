@@ -1,6 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { LucidePiggyBank, LucidePlus, LucideTrash2 } from '@lucide/angular';
-import { formatShortDate } from '../../core/dates';
 import { parseMoney } from '../../core/money';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PhpPipe } from '../../shared/php.pipe';
@@ -14,48 +13,15 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
     <section>
       <p class="text-sm text-slate-400">Money set aside</p>
       <h1 class="mt-1 text-3xl font-extrabold tracking-tight">Savings</h1>
-      <p class="mt-2 max-w-2xl text-sm text-slate-400">
-        Leftover cash from each cutoff, plus savings you keep in another bank.
-      </p>
-    </section>
-
-    <section class="mt-6 grid gap-3 md:grid-cols-3">
-      <article class="rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-200">Total savings</p>
-        <p class="mt-2 font-mono text-2xl font-bold text-white">{{ budget.totalSavings() | php }}</p>
-        <p class="mt-2 text-sm text-emerald-100/80">Cutoff leftover plus other banks.</p>
-      </article>
-      <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Remaining from cutoffs</p>
-        <p class="mt-2 font-mono text-2xl font-bold">{{ budget.cutoffRemaining() | php }}</p>
-        <p class="mt-2 text-sm text-slate-400">Cash not planned for a bill and not held in the sinking fund.</p>
-      </article>
-      <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Other bank savings</p>
-        <p class="mt-2 font-mono text-2xl font-bold">{{ budget.otherBankSavings() | php }}</p>
-        <p class="mt-2 text-sm text-slate-400">Balances you record from another bank.</p>
-      </article>
+      <p class="mt-2 max-w-2xl text-sm text-slate-400">Balances you keep in another bank.</p>
     </section>
 
     <section class="mt-6">
-      <h2 class="text-lg font-bold">Cutoff leftover</h2>
-      @if (leftovers().length === 0) {
-        <p class="mt-3 rounded-3xl border border-white/10 bg-slate-900/70 px-4 py-5 text-sm text-slate-400">
-          Every cutoff in the plan is fully allocated.
-        </p>
-      } @else {
-        <ul class="mt-3 space-y-2">
-          @for (row of leftovers(); track row.id) {
-            <li class="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3">
-              <div>
-                <p class="font-semibold">{{ shortDate(row.date) }}</p>
-                <p class="text-xs text-slate-400">{{ row.label }}</p>
-              </div>
-              <p class="font-mono text-emerald-200">{{ row.amount | php }}</p>
-            </li>
-          }
-        </ul>
-      }
+      <article class="max-w-md rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-5">
+        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-200">Total savings</p>
+        <p class="mt-2 font-mono text-2xl font-bold text-white">{{ budget.totalSavings() | php }}</p>
+        <p class="mt-2 text-sm text-emerald-100/80">Recorded bank balances only.</p>
+      </article>
     </section>
 
     <section class="mt-8">
@@ -116,25 +82,11 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
   `,
 })
 export class SavingsComponent {
-  /** Leftover cutoff cash and balances kept in other banks. */
   readonly budget = inject(BudgetStateService);
-  readonly shortDate = formatShortDate;
   readonly bankName = signal('');
   readonly accountName = signal('');
   readonly amount = signal('');
   readonly error = signal('');
-
-  readonly leftovers = computed(() =>
-    this.budget
-      .paycheckCycles()
-      .map((cycle) => ({
-        id: cycle.id,
-        date: cycle.cutoffDate,
-        label: cycle.label,
-        amount: this.budget.cycleUnallocated(cycle),
-      }))
-      .filter((row) => row.amount > 0.009),
-  );
 
   text(event: Event): string {
     return (event.target as HTMLInputElement).value;

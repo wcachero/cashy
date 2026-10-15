@@ -41,8 +41,33 @@ export function toFinanceExport(snapshot: BudgetSnapshot, asOf = '2026-10-15'): 
   };
 }
 
+export function parsePlanText(text: string): unknown | null {
+  const direct = readJson(text);
+  if (direct) return direct;
+  const marker = '\n  "snapshot":';
+  const index = text.lastIndexOf(marker);
+  if (index <= 0) return null;
+  return readJson(`${text.slice(0, index).replace(/,\s*$/, '')}\n}`);
+}
+
+function readJson(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function asLiabilities(value: unknown): LiabilityItem[] | null {
   return Array.isArray(value) ? (value as LiabilityItem[]) : null;
+}
+
+function asWithdrawals(value: unknown): BudgetSnapshot['withdrawals'] {
+  return Array.isArray(value) ? (value as BudgetSnapshot['withdrawals']) : [];
+}
+
+function asSharedExpenses(value: unknown): BudgetSnapshot['sharedExpenses'] {
+  return Array.isArray(value) ? (value as BudgetSnapshot['sharedExpenses']) : [];
 }
 
 function snapshotFromFinanceFile(record: Record<string, unknown>): BudgetSnapshot | null {
@@ -62,6 +87,8 @@ function snapshotFromFinanceFile(record: Record<string, unknown>): BudgetSnapsho
     notificationsEnabled: false,
     bankSavings: Array.isArray(record['bankSavings']) ? (record['bankSavings'] as BudgetSnapshot['bankSavings']) : [],
     receivables: Array.isArray(record['receivables']) ? (record['receivables'] as BudgetSnapshot['receivables']) : [],
+    withdrawals: asWithdrawals(record['withdrawals']),
+    sharedExpenses: asSharedExpenses(record['sharedExpenses']),
   };
 }
 
@@ -83,6 +110,8 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
         ...fromFile,
         liabilities: mergeLiabilities(nested.liabilities, fromFile.liabilities),
         notificationsEnabled: nested.notificationsEnabled,
+        withdrawals: nested.withdrawals,
+        sharedExpenses: nested.sharedExpenses?.length ? nested.sharedExpenses : fromFile.sharedExpenses,
       };
     }
     return fromFile ?? nested;
@@ -98,5 +127,7 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
     notificationsEnabled: Boolean(record['notificationsEnabled']),
     bankSavings: Array.isArray(record['bankSavings']) ? (record['bankSavings'] as BudgetSnapshot['bankSavings']) : [],
     receivables: Array.isArray(record['receivables']) ? (record['receivables'] as BudgetSnapshot['receivables']) : [],
+    withdrawals: asWithdrawals(record['withdrawals']),
+    sharedExpenses: asSharedExpenses(record['sharedExpenses']),
   };
 }

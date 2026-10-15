@@ -189,7 +189,7 @@ interface EditorState {
               <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.name" (input)="patch({ name: inputValue($event) })" />
             </label>
             <label class="block text-sm sm:col-span-2">
-              Bank / OLA name
+              Expense Name
               <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.bankName" (input)="patch({ bankName: inputValue($event) })" />
             </label>
             <label class="block text-sm">

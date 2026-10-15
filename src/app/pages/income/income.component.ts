@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { LucideHandCoins, LucidePencil, LucidePlus, LucideWallet } from '@lucide/angular';
+import { LucideHandCoins, LucidePencil, LucidePlus, LucideTrash2, LucideWallet } from '@lucide/angular';
 import { formatLongDate, ordinalDay } from '../../core/dates';
 import { parseMoney } from '../../core/money';
 import { CutoffType, IncomeStream, Receivable } from '../../models/budget.model';
@@ -12,7 +12,7 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
 @Component({
   selector: 'app-income',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, PhpPipe, WarningPopupComponent, ModalComponent, LucideWallet, LucideHandCoins, LucidePlus, LucidePencil],
+  imports: [RouterLink, PhpPipe, WarningPopupComponent, ModalComponent, LucideWallet, LucideHandCoins, LucidePlus, LucidePencil, LucideTrash2],
   template: `
     <section>
       <p class="text-sm text-slate-400">What funds each cutoff</p>
@@ -102,9 +102,14 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
                 <p class="font-semibold">{{ stream.name }}</p>
                 <p class="text-xs text-slate-400">Every {{ ordinal(stream.dayOfMonth) }} of the month · {{ stream.amount | php }}</p>
               </div>
-              <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openSalary(stream)">
-                <svg lucidePencil [size]="14"></svg> Update
-              </button>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openSalary(stream)">
+                  <svg lucidePencil [size]="14"></svg> Update
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-rose-400/30 px-3 py-2 text-sm text-rose-200" (click)="askRemove('salary', stream.id, stream.name)">
+                  <svg lucideTrash2 [size]="14"></svg> Remove
+                </button>
+              </div>
             </li>
           }
         </ul>
@@ -140,9 +145,14 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
                 </div>
                 <p class="font-mono text-emerald-200">{{ item.paymentAmount | php }}</p>
               </div>
-              <button type="button" class="mt-3 inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOwe(item)">
-                <svg lucidePencil [size]="14"></svg> Update
-              </button>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOwe(item)">
+                  <svg lucidePencil [size]="14"></svg> Update
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-rose-400/30 px-3 py-2 text-sm text-rose-200" (click)="askRemove('owe', item.id, item.name)">
+                  <svg lucideTrash2 [size]="14"></svg> Remove
+                </button>
+              </div>
             </li>
           }
         </ul>
@@ -163,9 +173,14 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
                 <p class="font-semibold">{{ stream.name }}</p>
                 <p class="text-xs text-slate-400">{{ otherDetail(stream) }} · {{ stream.amount | php }}</p>
               </div>
-              <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOther(stream)">
-                <svg lucidePencil [size]="14"></svg> Update
-              </button>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOther(stream)">
+                  <svg lucidePencil [size]="14"></svg> Update
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-rose-400/30 px-3 py-2 text-sm text-rose-200" (click)="askRemove('other', stream.id, stream.name)">
+                  <svg lucideTrash2 [size]="14"></svg> Remove
+                </button>
+              </div>
             </li>
           }
         </ul>
@@ -243,6 +258,17 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
         </div>
       }
     </app-modal>
+
+    <app-modal [open]="pendingRemove() !== null" (closed)="pendingRemove.set(null)">
+      @if (pendingRemove(); as item) {
+        <h2 class="text-xl font-bold">Remove {{ item.name }}?</h2>
+        <p class="mt-2 text-sm text-slate-400">Upcoming cutoffs will drop this amount. Payments already logged stay on those cutoffs.</p>
+        <div class="mt-5 flex flex-wrap gap-2">
+          <button type="button" class="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="confirmRemove()">Remove</button>
+          <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="pendingRemove.set(null)">Cancel</button>
+        </div>
+      }
+    </app-modal>
   `,
 })
 export class IncomeComponent {
@@ -260,6 +286,7 @@ export class IncomeComponent {
   readonly remarks = signal('');
   readonly receivedOn = signal('');
   readonly editing = signal<IncomeEdit | null>(null);
+  readonly pendingRemove = signal<{ kind: 'salary' | 'other' | 'owe'; id: string; name: string } | null>(null);
   readonly longDate = formatLongDate;
 
   isEmpty(): boolean {
@@ -463,6 +490,27 @@ export class IncomeComponent {
     }
     this.error.set('');
     this.editing.set(null);
+  }
+
+  askRemove(kind: 'salary' | 'other' | 'owe', id: string, name: string): void {
+    this.pendingRemove.set({ kind, id, name });
+  }
+
+  confirmRemove(): void {
+    const item = this.pendingRemove();
+    if (!item) return;
+    if (item.kind === 'owe') {
+      const receivable = this.budget.receivables().find((row) => row.id === item.id);
+      const inflow = receivable
+        ? this.budget.incomeStreams().find((stream) => stream.cutoffType === '30TH_INFLOW' && stream.name.toLowerCase().includes(receivable.name.toLowerCase()))
+        : undefined;
+      if (inflow) this.budget.removeIncome(inflow.id);
+      this.budget.removeReceivable(item.id);
+    } else {
+      this.budget.removeIncome(item.id);
+    }
+    this.notice.set(`${item.name} was removed.`);
+    this.pendingRemove.set(null);
   }
 }
 

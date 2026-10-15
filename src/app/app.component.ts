@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, HostListener, effect, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import {
+  LucideArrowDownToLine,
+  LucideUsers,
   LucideBell,
   LucideCalendarRange,
   LucideHandCoins,
@@ -34,6 +36,8 @@ import { ModalComponent } from './shared/modal.component';
     LucideCalendarRange,
     LucideLandmark,
     LucideSettings,
+    LucideArrowDownToLine,
+    LucideUsers,
     LucideBell,
     LucideLogOut,
     LucidePiggyBank,
@@ -59,7 +63,7 @@ import { ModalComponent } from './shared/modal.component';
     <header class="sticky top-0 z-30 flex items-center justify-between border-b border-white/10 bg-[#07111f]/90 px-4 py-3 backdrop-blur md:hidden">
       <a routerLink="/dashboard" class="flex items-center gap-2">
         <span class="grid h-9 w-9 place-items-center rounded-xl bg-emerald-400 font-extrabold text-slate-950">₱</span>
-        <span class="text-lg font-bold tracking-tight">Cashy</span>
+        <span class="text-lg font-bold tracking-tight">CashBii</span>
       </a>
       <div class="flex items-center gap-2">
         <app-theme-toggle />
@@ -89,7 +93,7 @@ import { ModalComponent } from './shared/modal.component';
         <a routerLink="/dashboard" class="flex items-center gap-3">
           <span class="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-400 text-xl font-extrabold text-slate-950">₱</span>
           <span>
-            <span class="block text-lg font-bold leading-none">Cashy</span>
+            <span class="block text-lg font-bold leading-none">CashBii</span>
             <span class="mt-1 block text-xs text-slate-400">Cash flow & Finance Planner</span>
           </span>
         </a>
@@ -120,6 +124,8 @@ import { ModalComponent } from './shared/modal.component';
               @case ('income') { <svg lucideWallet [size]="18"></svg> }
               @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
               @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+              @case ('withdrawals') { <svg lucideArrowDownToLine [size]="18"></svg> }
+              @case ('shared') { <svg lucideUsers [size]="18"></svg> }
               @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
               @case ('settings') { <svg lucideSettings [size]="18"></svg> }
             }
@@ -203,6 +209,8 @@ import { ModalComponent } from './shared/modal.component';
                   @case ('income') { <svg lucideWallet [size]="18"></svg> }
                   @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
                   @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+                  @case ('withdrawals') { <svg lucideArrowDownToLine [size]="18"></svg> }
+                  @case ('shared') { <svg lucideUsers [size]="18"></svg> }
                   @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
                   @case ('settings') { <svg lucideSettings [size]="18"></svg> }
                 }
@@ -229,6 +237,8 @@ import { ModalComponent } from './shared/modal.component';
               @case ('income') { <svg lucideWallet [size]="18"></svg> }
               @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
               @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+              @case ('withdrawals') { <svg lucideArrowDownToLine [size]="18"></svg> }
+              @case ('shared') { <svg lucideUsers [size]="18"></svg> }
               @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
               @case ('settings') { <svg lucideSettings [size]="18"></svg> }
             }
@@ -275,11 +285,13 @@ export class AppComponent {
     { path: '/income', label: 'Income', icon: 'income' },
     { path: '/debts', label: 'Debts/Expenses', icon: 'debts' },
     { path: '/savings', label: 'Savings', icon: 'savings' },
+    { path: '/withdrawals', label: 'Withdrawals', icon: 'withdrawals' },
+    { path: '/shared-expenses', label: 'Shared expenses', icon: 'shared' },
     { path: '/owes-you', label: 'Owes you', icon: 'owes' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
   readonly bottomNav = this.nav
-    .filter((item) => item.icon !== 'income' && item.icon !== 'settings')
+    .filter((item) => item.icon !== 'income' && item.icon !== 'settings' && item.icon !== 'withdrawals' && item.icon !== 'shared')
     .map((item) => ({ ...item, shortLabel: item.icon === 'debts' ? 'Expenses' : item.label }));
 
   constructor() {
@@ -288,7 +300,7 @@ export class AppComponent {
     effect(() => {
       if (!this.auth.user() || !this.budget.loaded()) return;
       const count = this.budget.upcomingDues().length;
-      document.title = count > 0 ? `(${count} due) Cashy` : 'Cashy';
+      document.title = count > 0 ? `(${count} due) CashBii` : 'CashBii';
       const noIncome = this.budget.incomeStreams().length === 0;
       const saveError = this.budget.saveError();
       this.incomePrompt.set(noIncome && !this.incomeDismissed);
@@ -346,7 +358,7 @@ export class AppComponent {
     this.savePrompt.set(false);
     this.budget.pauseSaves();
     await this.auth.logout();
-    document.title = 'Cashy';
+    document.title = 'CashBii';
   }
 
   private async boot(): Promise<void> {

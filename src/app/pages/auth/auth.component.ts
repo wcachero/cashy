@@ -17,7 +17,7 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
           <div class="flex items-center gap-3">
             <span class="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-400 text-xl font-extrabold text-slate-950">₱</span>
             <div>
-              <p class="text-lg font-bold leading-none">Cashy</p>
+              <p class="text-lg font-bold leading-none">CashBii</p>
               <p class="mt-1 text-xs text-slate-400">Cash flow & Finance Planner</p>
             </div>
           </div>

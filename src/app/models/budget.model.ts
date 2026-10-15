@@ -96,6 +96,14 @@ export interface BankSaving {
   notes?: string;
 }
 
+export interface CutoffWithdrawal {
+  id: string;
+  cycleId: string;
+  amount: number;
+  withdrawnOn: string;
+  note?: string;
+}
+
 export interface Receivable {
   id: string;
   name: string;
@@ -109,6 +117,30 @@ export interface Receivable {
   borrowedOn?: string;
   /** Remarks for this person. */
   notes?: string;
+  /** Set when this row was created from a shared expense. */
+  sharedExpenseId?: string;
+  shareId?: string;
+}
+
+export interface SharedExpenseShare {
+  id: string;
+  name: string;
+  amount: number;
+  paid: boolean;
+  paidOn?: string;
+  /** Cutoff that received this share when it was marked paid. */
+  creditedOn?: string;
+  creditedAmount?: number;
+  receivableId: string;
+}
+
+export interface SharedExpense {
+  id: string;
+  name: string;
+  totalAmount: number;
+  /** Date of the bill being split. */
+  expenseDate: string;
+  shares: SharedExpenseShare[];
 }
 
 export interface BudgetSnapshot {
@@ -119,6 +151,8 @@ export interface BudgetSnapshot {
   notificationsEnabled: boolean;
   bankSavings: BankSaving[];
   receivables: Receivable[];
+  withdrawals?: CutoffWithdrawal[];
+  sharedExpenses?: SharedExpense[];
   hideDebtTotal?: boolean;
   hideSavingsTotal?: boolean;
   revision?: number;

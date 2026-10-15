@@ -88,7 +88,7 @@ import { PhpPipe } from '../../shared/php.pipe';
         } @else {
           <p class="mt-3 font-mono text-2xl font-semibold text-emerald-200">{{ budget.totalSavings() | php }}</p>
         }
-        <p class="mt-2 text-xs text-slate-400">Cutoff leftover plus other banks.</p>
+        <p class="mt-2 text-xs text-slate-400">Balances recorded in other banks.</p>
       </article>
 
       @if (girlieVisible(); as person) {

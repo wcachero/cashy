@@ -23,6 +23,14 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/savings/savings.component').then((m) => m.SavingsComponent),
   },
   {
+    path: 'withdrawals',
+    loadComponent: () => import('./pages/withdrawals/withdrawals.component').then((m) => m.WithdrawalsComponent),
+  },
+  {
+    path: 'shared-expenses',
+    loadComponent: () => import('./pages/shared-expenses/shared-expenses.component').then((m) => m.SharedExpensesComponent),
+  },
+  {
     path: 'owes-you',
     loadComponent: () => import('./pages/receivables/receivables.component').then((m) => m.ReceivablesComponent),
   },
@@ -32,3 +40,4 @@ export const routes: Routes = [
   },
   { path: '**', redirectTo: 'dashboard' },
 ];
+

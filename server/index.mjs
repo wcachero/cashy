@@ -185,6 +185,6 @@ function normalizeUsername(value) {
 }
 
 app.listen(port, '127.0.0.1', () => {
-  console.log(`Cashy API listening on http://127.0.0.1:${port}`);
+  console.log(`CashBii API listening on http://127.0.0.1:${port}`);
   console.log(`SQLite database: ${dbPath}`);
 });

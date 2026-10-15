@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cashy</title>
+    <title>CashBii</title>
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#07111f" />
+    <meta name="theme-color" content="#f4f7fb" />
     <meta
       name="description"
       content="Personal cash flow and debt payoff tracker for bi-monthly salary cutoffs."
@@ -19,8 +19,14 @@
     />
     <script>
       try {
-        if (localStorage.getItem('cashy_theme') === 'light') document.documentElement.dataset.theme = 'light';
-      } catch (e) {}
+        var theme = localStorage.getItem('cashy_theme') === 'dark' ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        var themeColor = document.querySelector('meta[name="theme-color"]');
+        if (themeColor) themeColor.setAttribute('content', theme === 'light' ? '#f4f7fb' : '#07111f');
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light';
+      }
     </script>
   </head>
   <body>

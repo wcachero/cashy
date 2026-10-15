@@ -12,6 +12,7 @@ import {
   BankSaving,
   BudgetSnapshot,
   CutoffAllocationItem,
+  CutoffWithdrawal,
   DebtSlice,
   FreeCashStep,
   IncomeStream,
@@ -21,6 +22,8 @@ import {
   Milestone,
   PaycheckCycle,
   Receivable,
+  SharedExpense,
+  SharedExpenseShare,
   UpcomingDue,
 } from '../models/budget.model';
 
@@ -74,16 +77,14 @@ export class BudgetStateService {
   readonly hideSavingsTotal = signal(Boolean(this.seeded.hideSavingsTotal));
   readonly bankSavings = signal<BankSaving[]>(this.seeded.bankSavings ?? []);
   readonly receivables = signal<Receivable[]>(this.seeded.receivables ?? []);
+  readonly withdrawals = signal<CutoffWithdrawal[]>(this.seeded.withdrawals ?? []);
+  readonly sharedExpenses = signal<SharedExpense[]>(this.seeded.sharedExpenses ?? []);
   readonly loaded = signal(false);
   readonly saveError = signal('');
 
   readonly otherBankSavings = computed(() => round2(this.bankSavings().reduce((sum, item) => sum + Math.max(0, item.amount), 0)));
 
-  readonly cutoffRemaining = computed(() =>
-    round2(this.paycheckCycles().reduce((sum, cycle) => sum + Math.max(0, this.cycleUnallocated(cycle)), 0)),
-  );
-
-  readonly totalSavings = computed(() => round2(this.cutoffRemaining() + this.otherBankSavings()));
+  readonly totalSavings = computed(() => this.otherBankSavings());
 
   readonly totalOwedToYou = computed(() =>
     round2(this.receivables().reduce((sum, item) => sum + Math.max(0, item.totalDebt - item.amountReceived), 0)),
@@ -341,6 +342,8 @@ export class BudgetStateService {
     this.notificationsEnabled.set(Boolean(snapshot.notificationsEnabled));
     this.bankSavings.set(snapshot.bankSavings ?? []);
     this.receivables.set(snapshot.receivables ?? []);
+    this.withdrawals.set(snapshot.withdrawals ?? []);
+    this.sharedExpenses.set(snapshot.sharedExpenses ?? []);
     if (typeof snapshot.hideDebtTotal === 'boolean') this.hideDebtTotal.set(snapshot.hideDebtTotal);
     if (typeof snapshot.hideSavingsTotal === 'boolean') this.hideSavingsTotal.set(snapshot.hideSavingsTotal);
     if (typeof snapshot.revision === 'number' && snapshot.revision > this.revision) this.revision = snapshot.revision;
@@ -356,6 +359,38 @@ export class BudgetStateService {
 
   cyclePaid(cycle: PaycheckCycle): number {
     return round2(cycle.allocations.filter((item) => item.isPaid).reduce((sum, item) => sum + item.actualPaidAmount, 0));
+  }
+
+  cycleCash(cycle: PaycheckCycle): number {
+    return round2(this.cycleInflow(cycle) - this.cyclePaid(cycle));
+  }
+
+  withdrawnFor(cycleId: string): number {
+    return round2(this.withdrawals().filter((item) => item.cycleId === cycleId).reduce((sum, item) => sum + item.amount, 0));
+  }
+
+  remainingCash(cycle: PaycheckCycle): number {
+    if (cycle.cutoffDate > todayIso()) return 0;
+    return round2(this.cycleCash(cycle) - this.withdrawnFor(cycle.id));
+  }
+
+  addWithdrawal(draft: { cycleId: string; amount: number; note?: string }): void {
+    const cycle = this.paycheckCycles().find((item) => item.id === draft.cycleId);
+    if (!cycle || cycle.cutoffDate > todayIso()) return;
+    const amount = round2(Math.min(Math.max(0, draft.amount), Math.max(0, this.remainingCash(cycle))));
+    if (amount <= 0) return;
+    const entry: CutoffWithdrawal = {
+      id: crypto.randomUUID(),
+      cycleId: cycle.id,
+      amount,
+      withdrawnOn: todayIso(),
+      note: draft.note?.trim() || undefined,
+    };
+    this.withdrawals.update((list) => [...list, entry]);
+  }
+
+  removeWithdrawal(id: string): void {
+    this.withdrawals.update((list) => list.filter((item) => item.id !== id));
   }
 
   cycleUnallocated(cycle: PaycheckCycle): number {
@@ -653,6 +688,37 @@ export class BudgetStateService {
     );
   }
 
+  removeIncome(id: string): void {
+    const current = this.incomeStreams().find((stream) => stream.id === id);
+    if (!current) return;
+    this.incomeStreams.update((list) => list.filter((stream) => stream.id !== id));
+    const anchor = todayIso();
+    if (isSalaryCutoff(current.cutoffType)) {
+      this.paycheckCycles.update((cycles) =>
+        cycles.map((cycle) => {
+          if (cycle.cutoffDate < anchor || !cycleMatchesSalaryDay(cycle.cutoffDate, current.dayOfMonth)) return cycle;
+          return { ...cycle, baseIncome: this.salaryTotalForDay(current.dayOfMonth) };
+        }),
+      );
+      return;
+    }
+    this.paycheckCycles.update((cycles) =>
+      cycles.map((cycle) => {
+        if (cycle.cutoffDate < anchor) return cycle;
+        const day = Number(cycle.cutoffDate.slice(8, 10));
+        if (current.cutoffType === '30TH_INFLOW' && day === 25) {
+          const remaining = this.incomeStreams().find((stream) => stream.cutoffType === '30TH_INFLOW');
+          return { ...cycle, supplementaryIncome: remaining?.amount ?? 0 };
+        }
+        if (current.specificDate !== cycle.cutoffDate) return cycle;
+        if (current.cutoffType === 'CASH_ADVANCE') {
+          return { ...cycle, baseIncome: round2(Math.max(0, cycle.baseIncome - current.amount)) };
+        }
+        return { ...cycle, supplementaryIncome: round2(Math.max(0, cycle.supplementaryIncome - current.amount)) };
+      }),
+    );
+  }
+
   applyOwedPayment(payment: number, dueDay: number | undefined): void {
     const amount = round2(Math.max(0, payment));
     if (amount <= 0) return;
@@ -723,6 +789,8 @@ export class BudgetStateService {
       notificationsEnabled: this.notificationsEnabled(),
       bankSavings: this.bankSavings(),
       receivables: this.receivables(),
+      withdrawals: this.withdrawals(),
+      sharedExpenses: this.sharedExpenses(),
       hideDebtTotal: this.hideDebtTotal(),
       hideSavingsTotal: this.hideSavingsTotal(),
       revision: this.revision,
@@ -733,6 +801,7 @@ export class BudgetStateService {
     const snapshot = snapshotFromImport(value);
     if (!snapshot) return false;
     this.applySnapshot(snapshot);
+    this.flushSave();
     return true;
   }
 
@@ -845,6 +914,26 @@ export class BudgetStateService {
       }),
     );
     const cutoffDate = this.creditOwedPayment(current, applied);
+    const updated = this.receivables().find((item) => item.id === id);
+    if (
+      updated?.sharedExpenseId &&
+      updated.shareId &&
+      updated.amountReceived + 0.001 >= updated.totalDebt
+    ) {
+      this.sharedExpenses.update((expenses) =>
+        expenses.map((expense) => {
+          if (expense.id !== updated.sharedExpenseId) return expense;
+          return {
+            ...expense,
+            shares: expense.shares.map((share) =>
+              share.id === updated.shareId && !share.paid
+                ? { ...share, paid: true, paidOn: todayIso(), creditedOn: cutoffDate, creditedAmount: applied }
+                : share,
+            ),
+          };
+        }),
+      );
+    }
     const when = current.dueDayOfMonth ? `the ${ordinalDay(current.dueDayOfMonth)} cutoff` : 'the next cutoff';
     return `${current.name}'s payment of ${formatPhp(applied)} was added to ${when}${cutoffDate ? ` (${formatLongDate(cutoffDate)})` : ''}.`;
   }
@@ -874,7 +963,178 @@ export class BudgetStateService {
   }
 
   removeReceivable(id: string): void {
+    const current = this.receivables().find((item) => item.id === id);
+    if (current?.sharedExpenseId && current.shareId) this.detachShare(current.sharedExpenseId, current.shareId);
     this.receivables.update((list) => list.filter((item) => item.id !== id));
+  }
+
+  addSharedExpense(name: string, totalAmount: number, expenseDate: string): boolean {
+    const title = name.trim();
+    const total = round2(Math.max(0, totalAmount));
+    const date = expenseDate.trim();
+    if (!title || total <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+    const item: SharedExpense = { id: crypto.randomUUID(), name: title, totalAmount: total, expenseDate: date, shares: [] };
+    this.sharedExpenses.update((list) => [...list, item]);
+    return true;
+  }
+
+  setSharedExpenseDate(id: string, expenseDate: string): void {
+    const date = expenseDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const expense = this.sharedExpenses().find((item) => item.id === id);
+    if (!expense) return;
+    const dueDay = Number(date.slice(8, 10));
+    const receivableIds = new Set(expense.shares.map((share) => share.receivableId));
+    this.sharedExpenses.update((list) => list.map((item) => (item.id === id ? { ...item, expenseDate: date } : item)));
+    this.receivables.update((list) =>
+      list.map((item) => (receivableIds.has(item.id) ? { ...item, borrowedOn: date, dueDayOfMonth: dueDay } : item)),
+    );
+  }
+
+  addShare(expenseId: string, name: string, amount: number): boolean {
+    const expense = this.sharedExpenses().find((item) => item.id === expenseId);
+    const person = name.trim();
+    const shareAmount = round2(Math.max(0, amount));
+    if (!expense || !person || shareAmount <= 0) return false;
+    const used = round2(expense.shares.reduce((sum, share) => sum + share.amount, 0));
+    if (round2(used + shareAmount) > expense.totalAmount + 0.001) return false;
+    const shareId = crypto.randomUUID();
+    const receivableId = crypto.randomUUID();
+    const billDate = /^\d{4}-\d{2}-\d{2}$/.test(expense.expenseDate) ? expense.expenseDate : todayIso();
+    const share: SharedExpenseShare = { id: shareId, name: person, amount: shareAmount, paid: false, receivableId };
+    const receivable: Receivable = {
+      id: receivableId,
+      name: person,
+      totalDebt: shareAmount,
+      amountReceived: 0,
+      paymentAmount: shareAmount,
+      terms: 1,
+      dueDayOfMonth: Number(billDate.slice(8, 10)),
+      borrowedOn: billDate,
+      notes: `Share of ${expense.name}`,
+      sharedExpenseId: expense.id,
+      shareId,
+    };
+    this.sharedExpenses.update((list) =>
+      list.map((item) => (item.id === expenseId ? { ...item, shares: [...item.shares, share] } : item)),
+    );
+    this.receivables.update((list) => [...list, receivable]);
+    return true;
+  }
+
+  setSharePaid(expenseId: string, shareId: string, paid: boolean, paidOn?: string): void {
+    const expense = this.sharedExpenses().find((item) => item.id === expenseId);
+    const share = expense?.shares.find((item) => item.id === shareId);
+    if (!expense || !share) return;
+    if (paid) {
+      const date = paidOn || share.paidOn || todayIso();
+      const cutoff = this.cutoffOnOrAfter(date);
+      if (share.paid && share.creditedOn === cutoff) {
+        this.patchShare(expenseId, shareId, { paidOn: date });
+        return;
+      }
+      if (share.paid && share.creditedOn && share.creditedAmount) {
+        this.adjustSupplementary(share.creditedOn, -share.creditedAmount);
+        this.adjustSupplementary(cutoff, share.creditedAmount);
+        this.patchShare(expenseId, shareId, { paid: true, paidOn: date, creditedOn: cutoff });
+        return;
+      }
+      const receivable = this.receivables().find((item) => item.id === share.receivableId);
+      const already = receivable?.amountReceived ?? 0;
+      const due = round2(Math.max(0, share.amount - already));
+      if (due > 0) this.adjustSupplementary(cutoff, due);
+      this.patchShare(expenseId, shareId, { paid: true, paidOn: date, creditedOn: cutoff, creditedAmount: due });
+      this.receivables.update((list) =>
+        list.map((item) => (item.id === share.receivableId ? { ...item, amountReceived: share.amount, totalDebt: share.amount } : item)),
+      );
+      return;
+    }
+    if (!share.paid) return;
+    if (share.creditedOn && share.creditedAmount) this.adjustSupplementary(share.creditedOn, -share.creditedAmount);
+    const receivable = this.receivables().find((item) => item.id === share.receivableId);
+    const restored = round2(Math.max(0, (receivable?.amountReceived ?? 0) - (share.creditedAmount ?? 0)));
+    this.patchShare(expenseId, shareId, { paid: false, paidOn: undefined, creditedOn: undefined, creditedAmount: undefined });
+    this.receivables.update((list) =>
+      list.map((item) => (item.id === share.receivableId ? { ...item, amountReceived: restored } : item)),
+    );
+  }
+
+  removeShare(expenseId: string, shareId: string): void {
+    const share = this.sharedExpenses().find((item) => item.id === expenseId)?.shares.find((item) => item.id === shareId);
+    if (!share) return;
+    this.detachShare(expenseId, shareId);
+    this.receivables.update((list) => list.filter((item) => item.id !== share.receivableId));
+  }
+
+  removeSharedExpense(id: string): void {
+    const expense = this.sharedExpenses().find((item) => item.id === id);
+    if (!expense) return;
+    const receivableIds = new Set(expense.shares.map((share) => share.receivableId));
+    for (const share of [...expense.shares]) this.detachShare(id, share.id);
+    this.receivables.update((list) => list.filter((item) => !receivableIds.has(item.id)));
+    this.sharedExpenses.update((list) => list.filter((item) => item.id !== id));
+  }
+
+  private patchShare(expenseId: string, shareId: string, patch: Partial<SharedExpenseShare>): void {
+    this.sharedExpenses.update((list) =>
+      list.map((expense) => {
+        if (expense.id !== expenseId) return expense;
+        return {
+          ...expense,
+          shares: expense.shares.map((share) => (share.id === shareId ? { ...share, ...patch } : share)),
+        };
+      }),
+    );
+  }
+
+  private detachShare(expenseId: string, shareId: string): void {
+    const share = this.sharedExpenses().find((item) => item.id === expenseId)?.shares.find((item) => item.id === shareId);
+    if (share?.paid && share.creditedOn && share.creditedAmount) this.adjustSupplementary(share.creditedOn, -share.creditedAmount);
+    this.sharedExpenses.update((list) =>
+      list.map((expense) =>
+        expense.id === expenseId ? { ...expense, shares: expense.shares.filter((item) => item.id !== shareId) } : expense,
+      ),
+    );
+  }
+
+  private cutoffOnOrAfter(iso: string): string {
+    const upcoming = this.paycheckCycles()
+      .map((cycle) => cycle.cutoffDate)
+      .filter((date) => date >= iso)
+      .sort();
+    if (upcoming.length > 0) return upcoming[0];
+    const day = Number(iso.slice(8, 10));
+    const next = [10, 15, 25, 30].find((value) => value >= day);
+    if (next) return `${iso.slice(0, 8)}${String(next).padStart(2, '0')}`;
+    const year = Number(iso.slice(0, 4));
+    const month = Number(iso.slice(5, 7));
+    const rolled = month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+    return `${rolled.year}-${String(rolled.month).padStart(2, '0')}-10`;
+  }
+
+  private adjustSupplementary(date: string, delta: number): void {
+    const amount = round2(delta);
+    if (!amount) return;
+    if (!this.paycheckCycles().some((cycle) => cycle.cutoffDate === date)) {
+      const created: PaycheckCycle = {
+        id: date,
+        label: `${formatLongDate(date)} Cutoff`,
+        cutoffDate: date,
+        baseIncome: 0,
+        supplementaryIncome: 0,
+        carryOverFromPrevious: 0,
+        sinkingFundReserved: 0,
+        allocations: [],
+      };
+      this.paycheckCycles.update((cycles) => [...cycles, created].sort((a, b) => a.cutoffDate.localeCompare(b.cutoffDate)));
+    }
+    this.paycheckCycles.update((cycles) =>
+      cycles.map((cycle) =>
+        cycle.cutoffDate === date
+          ? { ...cycle, supplementaryIncome: round2(Math.max(0, cycle.supplementaryIncome + amount)) }
+          : cycle,
+      ),
+    );
   }
 
   private scheduleLiability(item: LiabilityItem): void {

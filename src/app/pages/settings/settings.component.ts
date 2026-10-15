@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { RouterLink } from '@angular/router';
 import { LucideBell, LucideDownload, LucideRotateCcw, LucideUpload } from '@lucide/angular';
 import { todayIso } from '../../core/dates';
-import { toFinanceExport } from '../../core/finance-export';
+import { parsePlanText, toFinanceExport } from '../../core/finance-export';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { DueNotificationService } from '../../services/due-notification.service';
 import { ModalComponent } from '../../shared/modal.component';
@@ -31,7 +31,7 @@ import { ModalComponent } from '../../shared/modal.component';
         <div>
           <h2 class="text-lg font-bold">Payment notifications</h2>
           <p class="mt-1 text-sm text-slate-400">
-            Bills due within 7 days always show on the dashboard. Turn on browser alerts to also get a notification when you open Cashy.
+            Bills due within 7 days always show on the dashboard. Turn on browser alerts to also get a notification when you open CashBii.
           </p>
         </div>
       </div>
@@ -52,7 +52,7 @@ import { ModalComponent } from '../../shared/modal.component';
       <label class="cursor-pointer rounded-3xl border border-white/10 bg-slate-900/70 p-5 transition hover:border-emerald-400/40">
         <svg lucideUpload [size]="20" class="text-sky-300"></svg>
         <h2 class="mt-3 font-bold">Import plan</h2>
-        <p class="mt-1 text-sm text-slate-400">Choose financial-plan-2026-10-15.json, or any Cashy export.</p>
+        <p class="mt-1 text-sm text-slate-400">Choose financial-plan-2026-10-15.json, or any CashBii export.</p>
         <input class="sr-only" type="file" accept="application/json,.json" (change)="importBackup($event)" />
       </label>
       <button type="button" class="rounded-3xl border border-rose-400/30 bg-rose-400/10 p-5 text-left" (click)="confirmReset.set(true)">
@@ -104,12 +104,12 @@ export class SettingsComponent {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result));
-        const restored = this.budget.importSnapshot(parsed);
-        this.message.set(restored ? 'Backup restored.' : 'That file is not a Cashy backup.');
-      } catch {
+      const parsed = parsePlanText(String(reader.result));
+      if (!parsed) {
         this.message.set('That file is not valid JSON.');
+      } else {
+        const restored = this.budget.importSnapshot(parsed);
+        this.message.set(restored ? 'Backup restored.' : 'That file is not a CashBii backup.');
       }
       input.value = '';
     };
