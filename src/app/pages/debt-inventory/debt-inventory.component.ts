@@ -1,0 +1,489 @@
+import { NgClass } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  LucideHandCoins,
+  LucidePencil,
+  LucidePlus,
+  LucideTrash2,
+  LucideX,
+} from '@lucide/angular';
+import { CATEGORY_FILTERS, CATEGORY_META, STATUS_META, categoryLabel, cutoffLabel, defaultCutoff } from '../../core/categories';
+import { todayIso } from '../../core/dates';
+import { collectYears, rangeOverlapsPeriod } from '../../core/period';
+import { parseMoney, round2 } from '../../core/money';
+import { AssignedCutoff, ItemStatus, LiabilityCategory, LiabilityItem } from '../../models/budget.model';
+import { BudgetStateService } from '../../services/budget-state.service';
+import { ModalComponent } from '../../shared/modal.component';
+import { PeriodFilterComponent } from '../../shared/period-filter.component';
+import { PhpPipe } from '../../shared/php.pipe';
+
+interface EditorState {
+  mode: 'add' | 'edit' | 'pay';
+  id?: string;
+  name: string;
+  bankName: string;
+  category: LiabilityCategory;
+  totalBalance: string;
+  monthlyAmortization: string;
+  minimumDue: string;
+  dueDay: string;
+  cutoff: AssignedCutoff;
+  terms: string;
+  startDate: string;
+  endDate: string;
+  status: ItemStatus;
+  notes: string;
+  addToCycles: boolean;
+  payment: string;
+  paymentNote: string;
+}
+
+@Component({
+  selector: 'app-debt-inventory',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [NgClass, PhpPipe, PeriodFilterComponent, ModalComponent, LucidePlus, LucidePencil, LucideTrash2, LucideHandCoins, LucideX],
+  template: `
+    <section class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <p class="text-sm text-slate-400">Loans, cards, OLAs, and living costs</p>
+        <h1 class="mt-1 text-3xl font-extrabold tracking-tight">Debts / Expenses</h1>
+        <p class="mt-2 max-w-2xl text-sm text-slate-400">
+          Balances update when you mark a cutoff paid. You can also correct a balance or log an extra payment, including a discount on Honey Loan or MoneyCat.
+        </p>
+      </div>
+      <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950" (click)="openAdd()">
+        <svg lucidePlus [size]="16"></svg> Add bill
+      </button>
+    </section>
+
+    @if (notice()) {
+      <p class="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">{{ notice() }}</p>
+    }
+
+    <div class="mt-5 flex flex-wrap items-end justify-between gap-3">
+      <app-period-filter [(month)]="month" [(year)]="year" [years]="years()" />
+    </div>
+
+    <div class="mt-5 flex flex-wrap gap-2">
+      @for (filter of filters; track filter) {
+        <button
+          type="button"
+          class="rounded-full border px-3 py-1.5 text-sm"
+          [ngClass]="category() === filter ? 'border-emerald-300 bg-emerald-400 text-slate-950' : 'border-white/10 bg-white/5'"
+          (click)="category.set(filter)"
+        >
+          {{ categoryLabel(filter) }}
+          <span class="opacity-70">{{ countFor(filter) }}</span>
+        </button>
+      }
+    </div>
+
+    <label class="mt-4 block">
+      <span class="sr-only">Search bills</span>
+      <input
+        class="w-full rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm outline-none ring-emerald-300/40 focus:ring-2"
+        type="search"
+        placeholder="Search by name or note"
+        [value]="query()"
+        (input)="query.set(inputValue($event))"
+      />
+    </label>
+
+    <p class="mt-4 text-sm text-slate-400">
+      Showing {{ filtered().length }} · debt balance {{ filteredBalance() | php }}
+    </p>
+
+    <div class="mt-3 space-y-3">
+      @for (item of filtered(); track item.id) {
+        <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="font-semibold">{{ item.name }}</h2>
+                <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="categoryMeta[item.category].badgeClass">
+                  {{ categoryMeta[item.category].label }}
+                </span>
+                <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="statusMeta[item.status].badgeClass">
+                  {{ statusMeta[item.status].label }}
+                </span>
+              </div>
+              @if (item.notes) {
+                <p class="mt-2 max-w-3xl text-sm text-slate-400">{{ item.notes }}</p>
+              }
+            </div>
+            <p class="font-mono text-lg">{{ item.category === 'LIVING_EXPENSE' ? (item.monthlyAmortization | php) : (item.totalBalance | php) }}</p>
+          </div>
+          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+            <div>
+              <dt class="text-xs text-slate-500">Bank / OLA</dt>
+              <dd>{{ item.bankName || item.name }}</dd>
+            </div>
+            <div>
+              <dt class="text-xs text-slate-500">Due day</dt>
+              <dd>{{ item.dueDayOfMonth }}</dd>
+            </div>
+            <div>
+              <dt class="text-xs text-slate-500">Cutoff</dt>
+              <dd>{{ item.splitAcrossCutoffs ? '10th & 25th' : cutoffLabel(item.assignedCutoff) }}</dd>
+            </div>
+            <div>
+              <dt class="text-xs text-slate-500">Monthly</dt>
+              <dd class="font-mono">{{ item.monthlyAmortization > 0 ? (item.monthlyAmortization | php) : '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-xs text-slate-500">Terms left</dt>
+              <dd>{{ item.remainingTerms ?? '—' }}</dd>
+            </div>
+          </dl>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 text-sm" (click)="openEdit(item)">
+              <svg lucidePencil [size]="14"></svg> Edit balance
+            </button>
+            @if (item.category !== 'LIVING_EXPENSE' && item.status !== 'PAID') {
+              <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 text-sm" (click)="openPay(item)">
+                <svg lucideHandCoins [size]="14"></svg> Log payment
+              </button>
+            }
+            <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-rose-400/30 px-3 py-1.5 text-sm text-rose-200" (click)="pendingDelete.set(item)">
+              <svg lucideTrash2 [size]="14"></svg> Remove
+            </button>
+          </div>
+        </article>
+      } @empty {
+        <p class="rounded-3xl border border-dashed border-white/15 px-4 py-10 text-center text-sm text-slate-400">No bills match this filter.</p>
+      }
+    </div>
+
+    <app-modal [open]="editor() !== null" (closed)="editor.set(null)">
+      @if (editor(); as form) {
+        <div class="flex items-start justify-between gap-3">
+          <h2 class="text-xl font-bold">
+            {{ form.mode === 'add' ? 'Add a bill' : form.mode === 'pay' ? 'Log a payment' : 'Edit ' + form.name }}
+          </h2>
+          <button type="button" class="grid h-9 w-9 place-items-center rounded-full border border-white/10" (click)="editor.set(null)" aria-label="Close">
+            <svg lucideX [size]="16"></svg>
+          </button>
+        </div>
+
+        @if (form.mode === 'pay') {
+          @if (formError()) {
+            <p class="mt-3 text-sm text-rose-300">{{ formError() }}</p>
+          }
+          <p class="mt-2 text-sm text-slate-400">
+            This reduces the balance now. If the same bill is still on a cutoff, lower that planned amount so it is not counted twice.
+          </p>
+          <label class="mt-4 block text-sm">
+            Amount
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.payment" (input)="patch({ payment: inputValue($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Note
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.paymentNote" placeholder="Extra principal, amnesty, discount" (input)="patch({ paymentNote: inputValue($event) })" />
+          </label>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="rounded-full border border-white/15 px-3 py-1.5 text-sm" (click)="fillFullBalance()">Settle full balance</button>
+            <button type="button" class="rounded-full bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="savePayment()">Save payment</button>
+          </div>
+        } @else {
+          @if (formError()) {
+            <p class="mt-3 text-sm text-rose-300">{{ formError() }}</p>
+          }
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <label class="block text-sm sm:col-span-2">
+              Name
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.name" (input)="patch({ name: inputValue($event) })" />
+            </label>
+            <label class="block text-sm sm:col-span-2">
+              Bank / OLA name
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.bankName" (input)="patch({ bankName: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              Category
+              <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.category" (change)="onCategory($event)">
+                @for (option of categories; track option) {
+                  <option [value]="option">{{ categoryLabel(option) }}</option>
+                }
+              </select>
+            </label>
+            <label class="block text-sm">
+              Status
+              <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.status" (change)="onStatus($event)">
+                <option value="ACTIVE">Active</option>
+                <option value="SCHEDULED">Scheduled</option>
+                <option value="PAST_DUE">Past due</option>
+                <option value="PAID">Paid</option>
+              </select>
+            </label>
+            <label class="block text-sm">
+              Balance
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.totalBalance" (input)="patch({ totalBalance: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              Monthly amount
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.monthlyAmortization" (input)="patch({ monthlyAmortization: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              Minimum due
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.minimumDue" (input)="patch({ minimumDue: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              Terms left
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              Due day
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="number" min="1" max="31" [value]="form.dueDay" (input)="onDueDay($event)" />
+            </label>
+            <label class="block text-sm">
+              Assigned cutoff
+              <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.cutoff" (change)="onCutoff($event)">
+                <option value="10TH_CUTOFF">10th cutoff</option>
+                <option value="25TH_CUTOFF">25th cutoff</option>
+                <option value="BOTH">10th and 25th</option>
+              </select>
+            </label>
+            <label class="block text-sm">
+              Start date
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.startDate" (input)="patch({ startDate: inputValue($event) })" />
+            </label>
+            <label class="block text-sm">
+              End date
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.endDate" (input)="patch({ endDate: inputValue($event) })" />
+            </label>
+            <label class="block text-sm sm:col-span-2">
+              Notes
+              <textarea class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" rows="3" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
+            </label>
+          </div>
+          @if (form.mode === 'add') {
+            <label class="mt-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" [checked]="form.addToCycles" (change)="patch({ addToCycles: checkedValue($event) })" />
+              Add this amount to future matching cutoffs
+            </label>
+          }
+          <button type="button" class="mt-4 rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950" (click)="saveEditor()">
+            {{ form.mode === 'add' ? 'Add bill' : 'Save changes' }}
+          </button>
+        }
+      }
+    </app-modal>
+
+    <app-modal [open]="pendingDelete() !== null" (closed)="pendingDelete.set(null)">
+      @if (pendingDelete(); as item) {
+        <h2 class="text-xl font-bold">Remove {{ item.name }}?</h2>
+        <p class="mt-2 text-sm text-slate-400">Unpaid rows on future cutoffs are removed. Payments you already checked stay on those cutoffs as history.</p>
+        <div class="mt-5 flex gap-2">
+          <button type="button" class="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="confirmDelete()">Remove</button>
+          <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="pendingDelete.set(null)">Cancel</button>
+        </div>
+      }
+    </app-modal>
+  `,
+})
+export class DebtInventoryComponent {
+  readonly budget = inject(BudgetStateService);
+  readonly filters = CATEGORY_FILTERS;
+  readonly categories = CATEGORY_FILTERS.filter((item): item is LiabilityCategory => item !== 'ALL');
+  readonly categoryMeta = CATEGORY_META;
+  readonly statusMeta = STATUS_META;
+  readonly categoryLabel = categoryLabel;
+  readonly cutoffLabel = cutoffLabel;
+  readonly category = signal<(typeof CATEGORY_FILTERS)[number]>('ALL');
+  readonly month = signal('all');
+  readonly year = signal('all');
+  readonly query = signal('');
+  readonly editor = signal<EditorState | null>(null);
+  readonly formError = signal('');
+  readonly pendingDelete = signal<LiabilityItem | null>(null);
+  readonly notice = signal('');
+
+  readonly years = computed(() => collectYears([], this.budget.liabilities().map((item) => ({ start: item.startDate, end: item.endDate }))));
+
+  readonly inPeriod = computed(() =>
+    this.budget.liabilities().filter((item) => rangeOverlapsPeriod(item.startDate, item.endDate, this.month(), this.year())),
+  );
+
+  readonly filtered = computed(() => {
+    const q = this.query().trim().toLowerCase();
+    const category = this.category();
+    return this.inPeriod()
+      .filter((item) => category === 'ALL' || item.category === category)
+      .filter((item) => !q || item.name.toLowerCase().includes(q) || (item.notes ?? '').toLowerCase().includes(q))
+      .sort((a, b) => a.priorityRank - b.priorityRank || a.name.localeCompare(b.name));
+  });
+
+  readonly filteredBalance = computed(() =>
+    round2(
+      this.filtered()
+        .filter((item) => item.category !== 'LIVING_EXPENSE')
+        .reduce((sum, item) => sum + item.totalBalance, 0),
+    ),
+  );
+
+  countFor(filter: (typeof CATEGORY_FILTERS)[number]): number {
+    const items = this.inPeriod();
+    if (filter === 'ALL') return items.length;
+    return items.filter((item) => item.category === filter).length;
+  }
+
+  inputValue(event: Event): string {
+    return (event.target as HTMLInputElement | HTMLTextAreaElement).value;
+  }
+
+  selectValue(event: Event): string {
+    return (event.target as HTMLSelectElement).value;
+  }
+
+  checkedValue(event: Event): boolean {
+    return (event.target as HTMLInputElement).checked;
+  }
+
+  openAdd(): void {
+    this.formError.set('');
+    this.editor.set({
+      mode: 'add',
+      name: '',
+      bankName: '',
+      category: 'FIXED_LOAN',
+      totalBalance: '',
+      monthlyAmortization: '',
+      minimumDue: '',
+      dueDay: '15',
+      cutoff: '10TH_CUTOFF',
+      terms: '',
+      startDate: todayIso(),
+      endDate: '',
+      status: 'ACTIVE',
+      notes: '',
+      addToCycles: true,
+      payment: '',
+      paymentNote: '',
+    });
+  }
+
+  openEdit(item: LiabilityItem): void {
+    this.formError.set('');
+    this.editor.set(this.fromItem(item, 'edit'));
+  }
+
+  openPay(item: LiabilityItem): void {
+    this.formError.set('');
+    this.editor.set({ ...this.fromItem(item, 'pay'), payment: '', paymentNote: '' });
+  }
+
+  patch(partial: Partial<EditorState>): void {
+    const current = this.editor();
+    if (!current) return;
+    this.editor.set({ ...current, ...partial });
+  }
+
+  onCategory(event: Event): void {
+    this.patch({ category: this.selectValue(event) as LiabilityCategory });
+  }
+
+  onStatus(event: Event): void {
+    this.patch({ status: this.selectValue(event) as ItemStatus });
+  }
+
+  onCutoff(event: Event): void {
+    this.patch({ cutoff: this.selectValue(event) as AssignedCutoff });
+  }
+
+  onDueDay(event: Event): void {
+    const dueDay = this.inputValue(event);
+    const day = Number(dueDay);
+    this.patch({
+      dueDay,
+      cutoff: defaultCutoff(Number.isFinite(day) ? day : 1),
+    });
+  }
+
+  fillFullBalance(): void {
+    const form = this.editor();
+    if (!form) return;
+    this.patch({ payment: form.totalBalance, paymentNote: form.paymentNote || 'Settlement / amnesty' });
+  }
+
+  savePayment(): void {
+    const form = this.editor();
+    if (!form?.id) return;
+    const amount = parseMoney(form.payment);
+    if (amount <= 0) {
+      this.formError.set('Enter a payment amount.');
+      return;
+    }
+    this.budget.logAdHocPayment(form.id, amount, form.paymentNote);
+    this.notice.set(`Payment for ${form.name} was saved.`);
+    this.editor.set(null);
+  }
+
+  saveEditor(): void {
+    const form = this.editor();
+    if (!form) return;
+    if (!form.name.trim()) {
+      this.formError.set('Give the bill a name.');
+      return;
+    }
+    const dueDay = Number(form.dueDay);
+    if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31) {
+      this.formError.set('Due day must be between 1 and 31.');
+      return;
+    }
+    const draft = {
+      name: form.name,
+      bankName: form.bankName,
+      category: form.category,
+      totalBalance: parseMoney(form.totalBalance),
+      monthlyAmortization: parseMoney(form.monthlyAmortization),
+      minimumDue: form.minimumDue ? parseMoney(form.minimumDue) : undefined,
+      dueDayOfMonth: dueDay,
+      assignedCutoff: form.cutoff,
+      remainingTerms: form.terms ? Number(form.terms) : undefined,
+      startDate: form.startDate,
+      endDate: form.endDate,
+      status: form.status,
+      notes: form.notes,
+      addToFutureCutoffs: form.addToCycles,
+    };
+    const savedName = form.name.trim();
+    if (form.mode === 'add') {
+      this.budget.addLiability(draft);
+      this.notice.set(`${savedName} was added.`);
+    } else if (form.id) {
+      this.budget.updateLiability(form.id, draft);
+      this.notice.set(`${savedName} was updated.`);
+    }
+    this.editor.set(null);
+  }
+
+  confirmDelete(): void {
+    const item = this.pendingDelete();
+    if (!item) return;
+    this.budget.deleteLiability(item.id);
+    this.notice.set(`${item.name} was removed.`);
+    this.pendingDelete.set(null);
+  }
+
+  private fromItem(item: LiabilityItem, mode: EditorState['mode']): EditorState {
+    return {
+      mode,
+      id: item.id,
+      name: item.name,
+      bankName: item.bankName ?? '',
+      category: item.category,
+      totalBalance: String(item.totalBalance),
+      monthlyAmortization: String(item.monthlyAmortization || ''),
+      minimumDue: item.minimumDue ? String(item.minimumDue) : '',
+      dueDay: String(item.dueDayOfMonth),
+      cutoff: item.assignedCutoff,
+      terms: item.remainingTerms != null ? String(item.remainingTerms) : '',
+      startDate: item.startDate,
+      endDate: item.endDate ?? '',
+      status: item.status,
+      notes: item.notes ?? '',
+      addToCycles: false,
+      payment: '',
+      paymentNote: '',
+    };
+  }
+}

@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #07111f;
+  color: #e8eef7;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+::selection {
+  background: #34d399;
+  color: #042f23;
+}
