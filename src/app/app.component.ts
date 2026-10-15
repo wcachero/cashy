@@ -7,9 +7,11 @@ import {
   LucideLandmark,
   LucideLayoutDashboard,
   LucideLogOut,
+  LucideMenu,
   LucidePiggyBank,
   LucideSettings,
   LucideWallet,
+  LucideX,
 } from '@lucide/angular';
 import { duePhrase, formatShortDate, formatWeekday, today } from './core/dates';
 import { AuthComponent } from './pages/auth/auth.component';
@@ -35,6 +37,8 @@ import { PhpPipe } from './shared/php.pipe';
     LucidePiggyBank,
     LucideHandCoins,
     LucideWallet,
+    LucideMenu,
+    LucideX,
     AuthComponent,
   ],
   template: `
@@ -54,6 +58,13 @@ import { PhpPipe } from './shared/php.pipe';
         <span class="text-lg font-bold tracking-tight">Cashy</span>
       </a>
       <div class="flex items-center gap-2">
+        <button type="button" class="grid h-10 w-10 place-items-center rounded-full border border-white/10 text-slate-200" [attr.aria-label]="menuOpen() ? 'Close menu' : 'Open menu'" [attr.aria-expanded]="menuOpen()" (click)="toggleMenu()">
+          @if (menuOpen()) {
+            <svg lucideX [size]="18"></svg>
+          } @else {
+            <svg lucideMenu [size]="18"></svg>
+          }
+        </button>
         <button type="button" class="grid h-10 w-10 place-items-center rounded-full border border-white/10 text-slate-300" aria-label="Sign out" (click)="logout()">
           <svg lucideLogOut [size]="16"></svg>
         </button>
@@ -168,9 +179,39 @@ import { PhpPipe } from './shared/php.pipe';
       </section>
     }
 
+    @if (menuOpen()) {
+      <button type="button" class="fixed inset-0 z-[55] bg-slate-950/60 md:hidden" aria-label="Close menu" (click)="menuOpen.set(false)"></button>
+      <nav class="fixed inset-x-0 top-[61px] z-[56] max-h-[calc(100vh-8rem)] overflow-y-auto border-b border-white/10 bg-slate-950 px-3 py-3 md:hidden" aria-label="Menu">
+        <ul class="space-y-1">
+          @for (item of nav; track item.path) {
+            <li>
+              <a
+                [routerLink]="item.path"
+                routerLinkActive="bg-emerald-400/15 text-emerald-100"
+                [routerLinkActiveOptions]="{ exact: true }"
+                class="flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium text-slate-300"
+                (click)="closeMenu()"
+              >
+                @switch (item.icon) {
+                  @case ('dashboard') { <svg lucideLayoutDashboard [size]="18"></svg> }
+                  @case ('cutoffs') { <svg lucideCalendarRange [size]="18"></svg> }
+                  @case ('income') { <svg lucideWallet [size]="18"></svg> }
+                  @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
+                  @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+                  @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
+                  @case ('settings') { <svg lucideSettings [size]="18"></svg> }
+                }
+                <span class="flex-1">{{ item.label }}</span>
+              </a>
+            </li>
+          }
+        </ul>
+      </nav>
+    }
+
     <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#07111f]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Primary">
-      <div class="grid grid-cols-7">
-        @for (item of nav; track item.path) {
+      <div class="grid grid-cols-6">
+        @for (item of bottomNav; track item.path) {
           <a
             [routerLink]="item.path"
             routerLinkActive="text-emerald-300"
@@ -201,6 +242,7 @@ export class AppComponent {
   readonly shortDate = formatShortDate;
   readonly duePhrase = duePhrase;
   readonly notificationsOpen = signal(false);
+  readonly menuOpen = signal(false);
   readonly nav = [
     { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { path: '/cutoffs', label: 'Cutoffs', icon: 'cutoffs' },
@@ -210,6 +252,7 @@ export class AppComponent {
     { path: '/owes-you', label: 'Owes you', icon: 'owes' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
+  readonly bottomNav = this.nav.filter((item) => item.icon !== 'income');
 
   constructor() {
     inject(DueNotificationService);
@@ -224,10 +267,21 @@ export class AppComponent {
   @HostListener('document:keydown.escape')
   closeNotifications(): void {
     this.notificationsOpen.set(false);
+    this.menuOpen.set(false);
   }
 
   toggleNotifications(): void {
+    this.menuOpen.set(false);
     this.notificationsOpen.update((open) => !open);
+  }
+
+  toggleMenu(): void {
+    this.notificationsOpen.set(false);
+    this.menuOpen.update((open) => !open);
+  }
+
+  closeMenu(): void {
+    setTimeout(() => this.menuOpen.set(false));
   }
 
   alertCount(): number {
