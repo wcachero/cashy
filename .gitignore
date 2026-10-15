@@ -47,3 +47,5 @@ data/exports/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+.dev.vars
+.wrangler/

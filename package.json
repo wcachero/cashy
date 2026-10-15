@@ -8,6 +8,7 @@
     "start:api": "node server/index.mjs",
     "export-plan": "tsx scripts/export-plan.ts",
     "build": "ng build",
+    "deploy": "ng build && npx wrangler d1 execute cashy --remote --file=worker/schema.sql && npx wrangler deploy",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -44,6 +45,7 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "tsx": "^4.23.15",
-    "typescript": "~5.7.2"
+    "typescript": "~5.7.2",
+    "wrangler": "^4.151.0"
   }
 }

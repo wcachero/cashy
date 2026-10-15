@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cashy",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "caf5da6c4cd915d48fe2cd3b415a90e8",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist/budget/browser",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cashy",
+      "database_id": "bfd29a12-3034-4cfc-b556-8a61cd403cfd"
+    }
+  ]
+}
