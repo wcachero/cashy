@@ -70,6 +70,22 @@ function asSharedExpenses(value: unknown): BudgetSnapshot['sharedExpenses'] {
   return Array.isArray(value) ? (value as BudgetSnapshot['sharedExpenses']) : [];
 }
 
+function asAccounts(value: unknown): BudgetSnapshot['accounts'] {
+  return Array.isArray(value) ? (value as BudgetSnapshot['accounts']) : [];
+}
+
+function asCash(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function asTransactions(value: unknown): BudgetSnapshot['transactions'] {
+  return Array.isArray(value) ? (value as BudgetSnapshot['transactions']) : [];
+}
+
+function asIncomeReceipts(value: unknown): BudgetSnapshot['incomeReceipts'] {
+  return Array.isArray(value) ? (value as BudgetSnapshot['incomeReceipts']) : [];
+}
+
 function snapshotFromFinanceFile(record: Record<string, unknown>): BudgetSnapshot | null {
   const expenses = asLiabilities(record['expenses']);
   const olas = asLiabilities(record['olas']);
@@ -89,6 +105,11 @@ function snapshotFromFinanceFile(record: Record<string, unknown>): BudgetSnapsho
     receivables: Array.isArray(record['receivables']) ? (record['receivables'] as BudgetSnapshot['receivables']) : [],
     withdrawals: asWithdrawals(record['withdrawals']),
     sharedExpenses: asSharedExpenses(record['sharedExpenses']),
+    accounts: asAccounts(record['accounts']),
+    cashOnHand: asCash(record['cashOnHand']),
+    cashEnabled: Boolean(record['cashEnabled']),
+    transactions: asTransactions(record['transactions']),
+    incomeReceipts: asIncomeReceipts(record['incomeReceipts']),
   };
 }
 
@@ -112,6 +133,11 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
         notificationsEnabled: nested.notificationsEnabled,
         withdrawals: nested.withdrawals,
         sharedExpenses: nested.sharedExpenses?.length ? nested.sharedExpenses : fromFile.sharedExpenses,
+        accounts: nested.accounts?.length ? nested.accounts : fromFile.accounts,
+        cashOnHand: nested.cashOnHand || fromFile.cashOnHand,
+        cashEnabled: Boolean(nested.cashEnabled || fromFile.cashEnabled),
+        transactions: nested.transactions?.length ? nested.transactions : fromFile.transactions,
+        incomeReceipts: nested.incomeReceipts?.length ? nested.incomeReceipts : fromFile.incomeReceipts,
       };
     }
     return fromFile ?? nested;
@@ -129,5 +155,10 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
     receivables: Array.isArray(record['receivables']) ? (record['receivables'] as BudgetSnapshot['receivables']) : [],
     withdrawals: asWithdrawals(record['withdrawals']),
     sharedExpenses: asSharedExpenses(record['sharedExpenses']),
+    accounts: asAccounts(record['accounts']),
+    cashOnHand: asCash(record['cashOnHand']),
+    cashEnabled: Boolean(record['cashEnabled']),
+    transactions: asTransactions(record['transactions']),
+    incomeReceipts: asIncomeReceipts(record['incomeReceipts']),
   };
 }

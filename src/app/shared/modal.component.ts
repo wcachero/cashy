@@ -12,7 +12,9 @@ const modalStack: ModalComponent[] = [];
         <div
           role="dialog"
           aria-modal="true"
-          class="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-slate-900 p-5 shadow-2xl sm:p-6"
+          class="relative max-h-[90vh] w-full overflow-y-auto rounded-3xl border border-white/10 bg-slate-900 p-5 shadow-2xl sm:p-6"
+          [class.max-w-lg]="size() !== 'lg'"
+          [class.max-w-3xl]="size() === 'lg'"
         >
           <ng-content />
         </div>
@@ -23,6 +25,7 @@ const modalStack: ModalComponent[] = [];
 export class ModalComponent implements OnDestroy {
   readonly open = input(false);
   readonly layer = input(70);
+  readonly size = input<'md' | 'lg'>('md');
   readonly closed = output<void>();
 
   constructor() {

@@ -10,11 +10,26 @@ body {
   min-height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
   background: #07111f;
   color: #e8eef7;
+  overflow-x: hidden;
+}
+
+/* iOS Safari zooms the page when a focused field is under 16px and leaves it zoomed. */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 input[type='number']::-webkit-outer-spin-button,
@@ -102,6 +117,7 @@ html[data-theme='light'] .text-emerald-300 {
 }
 
 html[data-theme='light'] .text-sky-50\/80,
+html[data-theme='light'] .text-sky-100,
 html[data-theme='light'] .text-sky-100\/70,
 html[data-theme='light'] .text-sky-100\/80,
 html[data-theme='light'] .text-sky-100\/90,
@@ -111,6 +127,7 @@ html[data-theme='light'] .text-sky-300 {
 }
 
 html[data-theme='light'] .text-amber-50\/80,
+html[data-theme='light'] .text-amber-100,
 html[data-theme='light'] .text-amber-100\/80,
 html[data-theme='light'] .text-amber-200 {
   color: #92400e;

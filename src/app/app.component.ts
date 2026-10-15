@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, HostListener, effect, inject, signa
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import {
   LucideArrowDownToLine,
+  LucideBuilding2,
   LucideUsers,
   LucideBell,
   LucideCalendarRange,
@@ -37,6 +38,7 @@ import { ModalComponent } from './shared/modal.component';
     LucideLandmark,
     LucideSettings,
     LucideArrowDownToLine,
+    LucideBuilding2,
     LucideUsers,
     LucideBell,
     LucideLogOut,
@@ -124,6 +126,7 @@ import { ModalComponent } from './shared/modal.component';
               @case ('income') { <svg lucideWallet [size]="18"></svg> }
               @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
               @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+              @case ('accounts') { <svg lucideBuilding2 [size]="18"></svg> }
               @case ('withdrawals') { <svg lucideArrowDownToLine [size]="18"></svg> }
               @case ('shared') { <svg lucideUsers [size]="18"></svg> }
               @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
@@ -209,6 +212,7 @@ import { ModalComponent } from './shared/modal.component';
                   @case ('income') { <svg lucideWallet [size]="18"></svg> }
                   @case ('debts') { <svg lucideLandmark [size]="18"></svg> }
                   @case ('savings') { <svg lucidePiggyBank [size]="18"></svg> }
+                  @case ('accounts') { <svg lucideBuilding2 [size]="18"></svg> }
                   @case ('withdrawals') { <svg lucideArrowDownToLine [size]="18"></svg> }
                   @case ('shared') { <svg lucideUsers [size]="18"></svg> }
                   @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
@@ -281,17 +285,18 @@ export class AppComponent {
   private saveDismissed = false;
   readonly nav = [
     { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { path: '/cutoffs', label: 'Cutoffs', icon: 'cutoffs' },
+    { path: '/cutoffs', label: 'Payments', icon: 'cutoffs' },
     { path: '/income', label: 'Income', icon: 'income' },
     { path: '/debts', label: 'Debts/Expenses', icon: 'debts' },
     { path: '/savings', label: 'Savings', icon: 'savings' },
+    { path: '/accounts', label: 'Banks/E-Wallet', icon: 'accounts' },
     { path: '/withdrawals', label: 'Withdrawals', icon: 'withdrawals' },
     { path: '/shared-expenses', label: 'Shared expenses', icon: 'shared' },
     { path: '/owes-you', label: 'Owes you', icon: 'owes' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
   readonly bottomNav = this.nav
-    .filter((item) => item.icon !== 'income' && item.icon !== 'settings' && item.icon !== 'withdrawals' && item.icon !== 'shared')
+    .filter((item) => !['income', 'settings', 'withdrawals', 'shared', 'accounts'].includes(item.icon))
     .map((item) => ({ ...item, shortLabel: item.icon === 'debts' ? 'Expenses' : item.label }));
 
   constructor() {

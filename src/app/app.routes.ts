@@ -23,6 +23,10 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/savings/savings.component').then((m) => m.SavingsComponent),
   },
   {
+    path: 'accounts',
+    loadComponent: () => import('./pages/accounts/accounts.component').then((m) => m.AccountsComponent),
+  },
+  {
     path: 'withdrawals',
     loadComponent: () => import('./pages/withdrawals/withdrawals.component').then((m) => m.WithdrawalsComponent),
   },

@@ -16,7 +16,7 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
       <p class="text-sm text-slate-400">Bills split with other people</p>
       <h1 class="mt-1 text-3xl font-extrabold tracking-tight">Shared expenses</h1>
       <p class="mt-2 max-w-2xl text-sm text-slate-400">
-        Add a bill and the people who split it with you. Each person is added to Owes you. Checking paid records the date and adds their share to the cutoff on or after that date.
+        Add a bill and the people who split it with you. Only your share goes on your cutoff and Expenses, and it updates as you add or remove people. Each person is added to Owes you; checking Paid records the date and clears what they owe.
       </p>
     </section>
 
@@ -67,7 +67,7 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
                 <dd class="font-mono">{{ splitTotal(expense) | php }}</dd>
               </div>
               <div>
-                <dt class="text-xs text-slate-500">Your share</dt>
+                <dt class="text-xs text-slate-500">Your share (on cutoff)</dt>
                 <dd class="font-mono">{{ yours(expense) | php }}</dd>
               </div>
               <div>
@@ -134,7 +134,7 @@ import { WarningPopupComponent } from '../../shared/warning-popup.component';
       <div class="fixed inset-0 z-[80] grid place-items-center bg-slate-950/70 px-4" (click)="pendingDelete.set(null)">
         <div class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-5" (click)="$event.stopPropagation()">
           <h2 class="text-xl font-bold">Remove {{ expense.name }}?</h2>
-          <p class="mt-2 text-sm text-slate-400">The people on this bill are removed from Owes you. A paid share is taken off the cutoff it was added to.</p>
+          <p class="mt-2 text-sm text-slate-400">The people on this bill are removed from Owes you, and the bill is removed from Expenses and its cutoff.</p>
           <div class="mt-5 flex gap-2">
             <button type="button" class="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="confirmDelete()">Remove</button>
             <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="pendingDelete.set(null)">Cancel</button>

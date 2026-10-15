@@ -88,7 +88,7 @@ import { PhpPipe } from '../../shared/php.pipe';
         } @else {
           <p class="mt-3 font-mono text-2xl font-semibold text-emerald-200">{{ budget.totalSavings() | php }}</p>
         }
-        <p class="mt-2 text-xs text-slate-400">Balances recorded in other banks.</p>
+        <p class="mt-2 text-xs text-slate-400">Banks, e-wallets, and cash on hand.</p>
       </article>
 
       @if (girlieVisible(); as person) {
@@ -197,7 +197,7 @@ import { PhpPipe } from '../../shared/php.pipe';
     <section class="mt-6">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-bold">Upcoming cutoffs</h2>
-        <a routerLink="/cutoffs" class="text-sm text-emerald-300">Open planner</a>
+        <a routerLink="/cutoffs" class="text-sm text-emerald-300">Open payments</a>
       </div>
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         @for (cycle of shownCycles(); track cycle.id) {
