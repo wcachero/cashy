@@ -1,3 +1,4 @@
+import { cutoffDays } from '../core/categories';
 import { monthsBetween, shiftMonth } from '../core/dates';
 import { round2 } from '../core/money';
 import {
@@ -960,9 +961,13 @@ export function cloneSnapshot(snapshot: BudgetSnapshot = createSeedSnapshot()): 
   return structuredClone(snapshot);
 }
 
+/**
+ * Due date a cutoff pays for. A bill due on or after payday is paid the same month;
+ * a bill due before payday is paid for the following month.
+ */
 export function dueDateForCutoff(cutoffDate: string, dueDay: number, cutoff: AssignedCutoff): string {
   if (cutoff === 'BOTH') return cutoffDate;
-  if (cutoff === '10TH_CUTOFF') return shiftMonth(cutoffDate, 0, dueDay);
-  if (dueDay >= 25) return shiftMonth(cutoffDate, 0, dueDay);
+  const anchor = cutoffDays(cutoff)[0];
+  if (dueDay >= anchor) return shiftMonth(cutoffDate, 0, dueDay);
   return shiftMonth(cutoffDate, 1, dueDay);
 }

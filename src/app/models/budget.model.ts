@@ -10,7 +10,7 @@ export type LiabilityCategory =
 
 export type ItemStatus = 'ACTIVE' | 'PAST_DUE' | 'PAID' | 'SCHEDULED';
 
-export type AssignedCutoff = '10TH_CUTOFF' | '25TH_CUTOFF' | 'BOTH';
+export type AssignedCutoff = '10TH_CUTOFF' | '15TH_CUTOFF' | '25TH_CUTOFF' | '30TH_CUTOFF' | 'BOTH';
 
 export interface BalanceAdjustment {
   id: string;
@@ -140,6 +140,8 @@ export interface SharedExpense {
   totalAmount: number;
   /** Date of the bill being split. */
   expenseDate: string;
+  /** Living expense created from this shared bill. */
+  liabilityId?: string;
   shares: SharedExpenseShare[];
 }
 

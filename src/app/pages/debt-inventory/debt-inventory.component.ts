@@ -1,4 +1,3 @@
-import { NgClass } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import {
   LucideHandCoins,
@@ -39,17 +38,38 @@ interface EditorState {
   paymentNote: string;
 }
 
+type EditorField = 'bankName' | 'status' | 'balance' | 'monthly' | 'minimum' | 'terms' | 'startDate' | 'endDate';
+
+/** Fields each bill type needs when adding. Edit mode also shows balance and status for debts. */
+const ADD_FIELDS: Record<LiabilityCategory, EditorField[]> = {
+  FIXED_LOAN: ['bankName', 'monthly', 'terms', 'startDate'],
+  REVOLVING_CC: ['bankName', 'balance', 'minimum', 'monthly'],
+  ONE_TIME_OLA: ['bankName', 'balance'],
+  PAST_DUE_OLA: ['bankName', 'balance', 'monthly'],
+  PERSONAL_DEBT: ['balance', 'monthly', 'terms', 'startDate'],
+  LIVING_EXPENSE: ['monthly', 'startDate', 'endDate'],
+};
+
+const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
+  FIXED_LOAN: 'Same amount every month. The balance is the monthly amount times the months to pay.',
+  REVOLVING_CC: 'Card balance with a minimum due. The planned payment goes on each cutoff.',
+  ONE_TIME_OLA: 'Paid once in full on the next matching cutoff.',
+  PAST_DUE_OLA: 'Overdue balance you are paying down. The monthly amount is what you plan to pay each cutoff.',
+  PERSONAL_DEBT: 'Money you owe a person. Terms are optional.',
+  LIVING_EXPENSE: 'Recurring household cost. It repeats on every matching cutoff.',
+};
+
 @Component({
   selector: 'app-debt-inventory',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, PhpPipe, PeriodFilterComponent, ModalComponent, WarningPopupComponent, LucidePlus, LucidePencil, LucideTrash2, LucideHandCoins, LucideX],
+  imports: [PhpPipe, PeriodFilterComponent, ModalComponent, WarningPopupComponent, LucidePlus, LucidePencil, LucideTrash2, LucideHandCoins, LucideX],
   template: `
     <section class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <p class="text-sm text-slate-400">Loans, cards, OLAs, and living costs</p>
         <h1 class="mt-1 text-3xl font-extrabold tracking-tight">Debts / Expenses</h1>
         <p class="mt-2 max-w-2xl text-sm text-slate-400">
-          Balances update when you mark a cutoff paid. You can also correct a balance or log an extra payment, including a discount on Honey Loan or MoneyCat.
+          Balances update when you mark a cutoff paid. You can also correct a balance or log an extra payment.
         </p>
       </div>
       <button type="button" class="inline-flex items-center gap-2 rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950" (click)="openAdd()">
@@ -63,20 +83,14 @@ interface EditorState {
 
     <div class="mt-5 flex flex-wrap items-end justify-between gap-3">
       <app-period-filter [(month)]="month" [(year)]="year" [years]="years()" />
-    </div>
-
-    <div class="mt-5 flex flex-wrap gap-2">
-      @for (filter of filters; track filter) {
-        <button
-          type="button"
-          class="rounded-full border px-3 py-1.5 text-sm"
-          [ngClass]="category() === filter ? 'border-emerald-300 bg-emerald-400 text-slate-950' : 'border-white/10 bg-white/5'"
-          (click)="category.set(filter)"
-        >
-          {{ categoryLabel(filter) }}
-          <span class="opacity-70">{{ countFor(filter) }}</span>
-        </button>
-      }
+      <label class="text-xs text-slate-400">
+        Type
+        <select class="mt-1 block min-w-44 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" [value]="category()" (change)="onType($event)">
+          @for (filter of filters; track filter) {
+            <option [value]="filter">{{ categoryLabel(filter) }} ({{ countFor(filter) }})</option>
+          }
+        </select>
+      </label>
     </div>
 
     <label class="mt-4 block">
@@ -183,14 +197,11 @@ interface EditorState {
             <button type="button" class="rounded-full bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="savePayment()">Save payment</button>
           </div>
         } @else {
+          <p class="mt-2 text-sm text-slate-400">{{ categoryHint(form.category) }}</p>
           <div class="mt-4 grid gap-3 sm:grid-cols-2">
             <label class="block text-sm sm:col-span-2">
               Name
               <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.name" (input)="patch({ name: inputValue($event) })" />
-            </label>
-            <label class="block text-sm sm:col-span-2">
-              Expense Name
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.bankName" (input)="patch({ bankName: inputValue($event) })" />
             </label>
             <label class="block text-sm">
               Category
@@ -200,31 +211,47 @@ interface EditorState {
                 }
               </select>
             </label>
-            <label class="block text-sm">
-              Status
-              <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.status" (change)="onStatus($event)">
-                <option value="ACTIVE">Active</option>
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="PAST_DUE">Past due</option>
-                <option value="PAID">Paid</option>
-              </select>
-            </label>
-            <label class="block text-sm">
-              Balance
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.totalBalance" (input)="patch({ totalBalance: inputValue($event) })" />
-            </label>
-            <label class="block text-sm">
-              Monthly amount
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.monthlyAmortization" (input)="patch({ monthlyAmortization: inputValue($event) })" />
-            </label>
-            <label class="block text-sm">
-              Minimum due
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.minimumDue" (input)="patch({ minimumDue: inputValue($event) })" />
-            </label>
-            <label class="block text-sm">
-              Terms left
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
-            </label>
+            @if (shows(form, 'bankName')) {
+              <label class="block text-sm">
+                Expense Name
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.bankName" placeholder="Bank, card, or app" (input)="patch({ bankName: inputValue($event) })" />
+              </label>
+            }
+            @if (shows(form, 'status')) {
+              <label class="block text-sm">
+                Status
+                <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.status" (change)="onStatus($event)">
+                  <option value="ACTIVE">Active</option>
+                  <option value="SCHEDULED">Scheduled</option>
+                  <option value="PAST_DUE">Past due</option>
+                  <option value="PAID">Paid</option>
+                </select>
+              </label>
+            }
+            @if (shows(form, 'balance')) {
+              <label class="block text-sm">
+                {{ form.category === 'ONE_TIME_OLA' ? 'Amount to pay' : 'Balance' }}
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.totalBalance" (input)="patch({ totalBalance: inputValue($event) })" />
+              </label>
+            }
+            @if (shows(form, 'monthly')) {
+              <label class="block text-sm">
+                {{ monthlyLabel(form.category) }}
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.monthlyAmortization" (input)="patch({ monthlyAmortization: inputValue($event) })" />
+              </label>
+            }
+            @if (shows(form, 'minimum')) {
+              <label class="block text-sm">
+                Minimum due
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.minimumDue" (input)="patch({ minimumDue: inputValue($event) })" />
+              </label>
+            }
+            @if (shows(form, 'terms')) {
+              <label class="block text-sm">
+                {{ form.category === 'FIXED_LOAN' ? 'Months to pay' : 'Terms left' }}
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
+              </label>
+            }
             <label class="block text-sm">
               Due day
               <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="number" min="1" max="31" [value]="form.dueDay" (input)="onDueDay($event)" />
@@ -233,23 +260,35 @@ interface EditorState {
               Assigned cutoff
               <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.cutoff" (change)="onCutoff($event)">
                 <option value="10TH_CUTOFF">10th cutoff</option>
+                <option value="15TH_CUTOFF">15th cutoff</option>
                 <option value="25TH_CUTOFF">25th cutoff</option>
+                <option value="30TH_CUTOFF">30th cutoff</option>
                 <option value="BOTH">10th and 25th</option>
               </select>
             </label>
-            <label class="block text-sm">
-              Start date
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.startDate" (input)="patch({ startDate: inputValue($event) })" />
-            </label>
-            <label class="block text-sm">
-              End date
-              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.endDate" (input)="patch({ endDate: inputValue($event) })" />
-            </label>
+            @if (shows(form, 'startDate')) {
+              <label class="block text-sm">
+                {{ form.category === 'FIXED_LOAN' ? 'First payment month' : 'Start date' }}
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.startDate" (input)="patch({ startDate: inputValue($event) })" />
+              </label>
+            }
+            @if (shows(form, 'endDate')) {
+              <label class="block text-sm">
+                End date
+                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.endDate" (input)="patch({ endDate: inputValue($event) })" />
+              </label>
+            }
             <label class="block text-sm sm:col-span-2">
               Notes
-              <textarea class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" rows="3" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
+              <textarea class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" rows="2" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
             </label>
           </div>
+          @if (form.mode === 'add' && form.category === 'FIXED_LOAN' && loanTotal(form) > 0) {
+            <p class="mt-3 text-sm text-slate-400">
+              Total to pay: <span class="font-mono text-white">{{ loanTotal(form) | php }}</span>
+              ({{ loanMonthly(form) | php }} × {{ form.terms }} months)
+            </p>
+          }
           @if (form.mode === 'add') {
             <label class="mt-3 flex items-center gap-2 text-sm">
               <input type="checkbox" [checked]="form.addToCycles" (change)="patch({ addToCycles: checkedValue($event) })" />
@@ -327,6 +366,10 @@ export class DebtInventoryComponent {
     return (event.target as HTMLInputElement | HTMLTextAreaElement).value;
   }
 
+  onType(event: Event): void {
+    this.category.set(this.selectValue(event) as (typeof CATEGORY_FILTERS)[number]);
+  }
+
   selectValue(event: Event): string {
     return (event.target as HTMLSelectElement).value;
   }
@@ -375,7 +418,37 @@ export class DebtInventoryComponent {
   }
 
   onCategory(event: Event): void {
-    this.patch({ category: this.selectValue(event) as LiabilityCategory });
+    const category = this.selectValue(event) as LiabilityCategory;
+    const current = this.editor();
+    const status: ItemStatus = current?.mode === 'add' ? (category === 'PAST_DUE_OLA' ? 'PAST_DUE' : 'ACTIVE') : (current?.status ?? 'ACTIVE');
+    this.patch({ category, status });
+  }
+
+  shows(form: EditorState, field: EditorField): boolean {
+    if (ADD_FIELDS[form.category].includes(field)) return true;
+    if (form.mode !== 'edit' || form.category === 'LIVING_EXPENSE') return false;
+    return field === 'balance' || field === 'status';
+  }
+
+  categoryHint(category: LiabilityCategory): string {
+    return CATEGORY_HINTS[category];
+  }
+
+  monthlyLabel(category: LiabilityCategory): string {
+    if (category === 'REVOLVING_CC' || category === 'PAST_DUE_OLA') return 'Planned payment per cutoff';
+    if (category === 'FIXED_LOAN') return 'Monthly amount';
+    return 'Amount per cutoff';
+  }
+
+  loanMonthly(form: EditorState): number {
+    return parseMoney(form.monthlyAmortization);
+  }
+
+  loanTotal(form: EditorState): number {
+    const monthly = parseMoney(form.monthlyAmortization);
+    const terms = Number(form.terms);
+    if (monthly <= 0 || !Number.isInteger(terms) || terms < 1) return 0;
+    return round2(monthly * terms);
   }
 
   onStatus(event: Event): void {
@@ -426,18 +499,46 @@ export class DebtInventoryComponent {
       this.formError.set('Due day must be between 1 and 31.');
       return;
     }
+    const adding = form.mode === 'add';
+    const category = form.category;
+    let totalBalance = this.shows(form, 'balance') ? parseMoney(form.totalBalance) : 0;
+    let monthlyAmortization = this.shows(form, 'monthly') ? parseMoney(form.monthlyAmortization) : 0;
+    const minimumDue = this.shows(form, 'minimum') && form.minimumDue ? parseMoney(form.minimumDue) : undefined;
+    let remainingTerms = this.shows(form, 'terms') && form.terms ? Number(form.terms) : undefined;
+
+    if (category === 'FIXED_LOAN') {
+      if (monthlyAmortization <= 0) return this.formError.set('Enter the monthly amount.');
+      if (!remainingTerms || remainingTerms < 1) return this.formError.set('Enter how many months are left.');
+      if (adding) totalBalance = round2(monthlyAmortization * remainingTerms);
+    } else if (category === 'LIVING_EXPENSE') {
+      if (monthlyAmortization <= 0) return this.formError.set('Enter the amount per cutoff.');
+    } else if (category === 'ONE_TIME_OLA') {
+      if (totalBalance <= 0) return this.formError.set('Enter the amount to pay.');
+      monthlyAmortization = totalBalance;
+      remainingTerms = 1;
+    } else if (category === 'REVOLVING_CC') {
+      if (totalBalance <= 0) return this.formError.set('Enter the card balance.');
+      if (monthlyAmortization <= 0) monthlyAmortization = minimumDue ?? 0;
+      if (monthlyAmortization <= 0) return this.formError.set('Enter a planned payment or a minimum due.');
+    } else if (totalBalance <= 0) {
+      return this.formError.set('Enter the balance.');
+    }
+    if (monthlyAmortization > totalBalance && category !== 'LIVING_EXPENSE' && category !== 'FIXED_LOAN') {
+      monthlyAmortization = totalBalance;
+    }
+
     const draft = {
       name: form.name,
-      bankName: form.bankName,
-      category: form.category,
-      totalBalance: parseMoney(form.totalBalance),
-      monthlyAmortization: parseMoney(form.monthlyAmortization),
-      minimumDue: form.minimumDue ? parseMoney(form.minimumDue) : undefined,
+      bankName: this.shows(form, 'bankName') || !adding ? form.bankName : '',
+      category,
+      totalBalance,
+      monthlyAmortization,
+      minimumDue,
       dueDayOfMonth: dueDay,
       assignedCutoff: form.cutoff,
-      remainingTerms: form.terms ? Number(form.terms) : undefined,
-      startDate: form.startDate,
-      endDate: form.endDate,
+      remainingTerms,
+      startDate: this.shows(form, 'startDate') ? form.startDate : adding ? todayIso() : form.startDate,
+      endDate: this.shows(form, 'endDate') || !adding ? form.endDate : '',
       status: form.status,
       notes: form.notes,
       addToFutureCutoffs: form.addToCycles,

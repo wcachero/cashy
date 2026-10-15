@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { CATEGORY_META, defaultCutoff } from '../core/categories';
+import { CATEGORY_META, cutoffDays, defaultCutoff } from '../core/categories';
 import { daysBetween, formatLongDate, formatMonthYear, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
 import { snapshotFromImport } from '../core/finance-export';
 import { formatPhp, round2 } from '../core/money';
@@ -975,6 +975,7 @@ export class BudgetStateService {
     if (!title || total <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
     const item: SharedExpense = { id: crypto.randomUUID(), name: title, totalAmount: total, expenseDate: date, shares: [] };
     this.sharedExpenses.update((list) => [...list, item]);
+    this.upsertSharedBill(item);
     return true;
   }
 
@@ -989,6 +990,8 @@ export class BudgetStateService {
     this.receivables.update((list) =>
       list.map((item) => (receivableIds.has(item.id) ? { ...item, borrowedOn: date, dueDayOfMonth: dueDay } : item)),
     );
+    const saved = this.sharedExpenses().find((item) => item.id === id);
+    if (saved) this.upsertSharedBill(saved);
   }
 
   addShare(expenseId: string, name: string, amount: number): boolean {
@@ -1019,6 +1022,8 @@ export class BudgetStateService {
       list.map((item) => (item.id === expenseId ? { ...item, shares: [...item.shares, share] } : item)),
     );
     this.receivables.update((list) => [...list, receivable]);
+    const saved = this.sharedExpenses().find((item) => item.id === expenseId);
+    if (saved) this.upsertSharedBill(saved);
     return true;
   }
 
@@ -1064,6 +1069,8 @@ export class BudgetStateService {
     if (!share) return;
     this.detachShare(expenseId, shareId);
     this.receivables.update((list) => list.filter((item) => item.id !== share.receivableId));
+    const saved = this.sharedExpenses().find((item) => item.id === expenseId);
+    if (saved) this.upsertSharedBill(saved);
   }
 
   removeSharedExpense(id: string): void {
@@ -1073,6 +1080,7 @@ export class BudgetStateService {
     for (const share of [...expense.shares]) this.detachShare(id, share.id);
     this.receivables.update((list) => list.filter((item) => !receivableIds.has(item.id)));
     this.sharedExpenses.update((list) => list.filter((item) => item.id !== id));
+    if (expense.liabilityId) this.deleteLiability(expense.liabilityId);
   }
 
   private patchShare(expenseId: string, shareId: string, patch: Partial<SharedExpenseShare>): void {
@@ -1115,19 +1123,7 @@ export class BudgetStateService {
   private adjustSupplementary(date: string, delta: number): void {
     const amount = round2(delta);
     if (!amount) return;
-    if (!this.paycheckCycles().some((cycle) => cycle.cutoffDate === date)) {
-      const created: PaycheckCycle = {
-        id: date,
-        label: `${formatLongDate(date)} Cutoff`,
-        cutoffDate: date,
-        baseIncome: 0,
-        supplementaryIncome: 0,
-        carryOverFromPrevious: 0,
-        sinkingFundReserved: 0,
-        allocations: [],
-      };
-      this.paycheckCycles.update((cycles) => [...cycles, created].sort((a, b) => a.cutoffDate.localeCompare(b.cutoffDate)));
-    }
+    this.ensureCycle(date);
     this.paycheckCycles.update((cycles) =>
       cycles.map((cycle) =>
         cycle.cutoffDate === date
@@ -1137,16 +1133,129 @@ export class BudgetStateService {
     );
   }
 
+  private ensureCycle(date: string): void {
+    if (this.paycheckCycles().some((cycle) => cycle.cutoffDate === date)) return;
+    const created: PaycheckCycle = {
+      id: date,
+      label: `${formatLongDate(date)} Cutoff`,
+      cutoffDate: date,
+      baseIncome: 0,
+      supplementaryIncome: 0,
+      carryOverFromPrevious: 0,
+      sinkingFundReserved: 0,
+      allocations: [],
+    };
+    this.paycheckCycles.update((cycles) => [...cycles, created].sort((a, b) => a.cutoffDate.localeCompare(b.cutoffDate)));
+  }
+
+  private upsertSharedBill(expense: SharedExpense): void {
+    const dueDay = Number(expense.expenseDate.slice(8, 10)) || 1;
+    const yours = round2(Math.max(0, expense.totalAmount - expense.shares.reduce((sum, share) => sum + share.amount, 0)));
+    const notes = expense.shares.length
+      ? `Shared expense. Your share is ${formatPhp(yours)}.`
+      : 'Shared expense.';
+    const current = expense.liabilityId ? this.liabilities().find((item) => item.id === expense.liabilityId) : undefined;
+    const liabilityId = current?.id ?? crypto.randomUUID();
+    if (!current) {
+      const item: LiabilityItem = {
+        id: liabilityId,
+        name: expense.name,
+        bankName: expense.name,
+        category: 'LIVING_EXPENSE',
+        totalBalance: 0,
+        initialBalance: 0,
+        originalBalance: 0,
+        adjustments: [],
+        monthlyAmortization: expense.totalAmount,
+        dueDayOfMonth: dueDay,
+        assignedCutoff: defaultCutoff(dueDay),
+        remainingTerms: 1,
+        originalTerms: 1,
+        startDate: expense.expenseDate,
+        endDate: expense.expenseDate,
+        status: 'ACTIVE',
+        priorityRank: this.liabilities().reduce((max, item) => Math.max(max, item.priorityRank), 0) + 1,
+        notes,
+      };
+      this.liabilities.update((list) => [...list, item]);
+      this.sharedExpenses.update((list) => list.map((item) => (item.id === expense.id ? { ...item, liabilityId } : item)));
+    } else {
+      this.liabilities.update((list) =>
+        list.map((item) =>
+          item.id === liabilityId
+            ? {
+                ...item,
+                name: expense.name,
+                bankName: expense.name,
+                monthlyAmortization: expense.totalAmount,
+                dueDayOfMonth: dueDay,
+                assignedCutoff: defaultCutoff(dueDay),
+                startDate: expense.expenseDate,
+                endDate: expense.expenseDate,
+                notes,
+              }
+            : item,
+        ),
+      );
+    }
+    this.placeSharedAllocation(liabilityId, expense);
+  }
+
+  private placeSharedAllocation(liabilityId: string, expense: SharedExpense): void {
+    const paid = this.paycheckCycles().some((cycle) =>
+      cycle.allocations.some((allocation) => allocation.liabilityId === liabilityId && allocation.isPaid),
+    );
+    this.paycheckCycles.update((cycles) =>
+      cycles.map((cycle) => ({
+        ...cycle,
+        allocations: cycle.allocations.filter((allocation) => allocation.liabilityId !== liabilityId || allocation.isPaid),
+      })),
+    );
+    if (paid) return;
+    const cutoff = this.cutoffOnOrAfter(expense.expenseDate);
+    this.ensureCycle(cutoff);
+    this.paycheckCycles.update((cycles) =>
+      cycles.map((cycle) => {
+        if (cycle.cutoffDate !== cutoff || cycle.allocations.some((allocation) => allocation.liabilityId === liabilityId)) return cycle;
+        const allocation: CutoffAllocationItem = {
+          id: `${cycle.id}:${liabilityId}`,
+          liabilityId,
+          name: expense.name,
+          category: 'LIVING_EXPENSE',
+          dueDate: expense.expenseDate,
+          plannedAmount: expense.totalAmount,
+          actualPaidAmount: 0,
+          isPaid: false,
+          countsAsTerm: false,
+          paymentNote: 'Shared expense',
+        };
+        return { ...cycle, allocations: [...cycle.allocations, allocation] };
+      }),
+    );
+  }
+
+  /** Cutoff cycles for the bill's payday (10th, 15th, 25th, or 30th) over the same horizon salaries use. */
+  private ensureAssignedCycles(item: LiabilityItem): void {
+    const cycles = this.paycheckCycles();
+    const known = new Set(cycles.map((cycle) => cycle.cutoffDate));
+    for (const day of cutoffDays(item.assignedCutoff)) {
+      for (const iso of salaryCutoffDates(day, cycles, todayIso())) {
+        if (known.has(iso)) continue;
+        this.ensureCycle(iso);
+        known.add(iso);
+      }
+    }
+  }
+
   private scheduleLiability(item: LiabilityItem): void {
     const occurrences = item.remainingTerms && item.remainingTerms > 0 ? item.remainingTerms : item.category === 'LIVING_EXPENSE' ? 24 : 1;
+    this.ensureAssignedCycles(item);
     let added = 0;
     this.paycheckCycles.update((cycles) => {
-      const next = structuredClone(cycles);
+      const next = structuredClone(cycles).sort((a, b) => a.cutoffDate.localeCompare(b.cutoffDate));
       for (const cycle of next) {
         if (added >= occurrences) break;
-        const day = Number(cycle.cutoffDate.slice(8, 10));
-        const matches =
-          item.assignedCutoff === 'BOTH' ? day === 10 || day === 25 : item.assignedCutoff === '10TH_CUTOFF' ? day === 10 : day === 25;
+        const matches = cutoffDays(item.assignedCutoff).some((day) => cycleMatchesSalaryDay(cycle.cutoffDate, day));
         if (!matches) continue;
         const dueDate = dueDateForCutoff(cycle.cutoffDate, item.dueDayOfMonth, item.assignedCutoff);
         if (dueDate < item.startDate) continue;

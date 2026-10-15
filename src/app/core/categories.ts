@@ -63,7 +63,16 @@ export function categoryLabel(category: LiabilityCategory | 'ALL'): string {
 
 export function cutoffLabel(cutoff: AssignedCutoff): string {
   if (cutoff === 'BOTH') return '10th & 25th';
+  if (cutoff === '15TH_CUTOFF') return '15th';
+  if (cutoff === '30TH_CUTOFF') return '30th';
   return cutoff === '10TH_CUTOFF' ? '10th' : '25th';
+}
+
+export function cutoffDays(cutoff: AssignedCutoff): number[] {
+  if (cutoff === 'BOTH') return [10, 25];
+  if (cutoff === '15TH_CUTOFF') return [15];
+  if (cutoff === '30TH_CUTOFF') return [30];
+  return cutoff === '10TH_CUTOFF' ? [10] : [25];
 }
 
 /** Bills due on the 11th–24th are funded by the 10th salary. Everything else waits for the 25th. */
