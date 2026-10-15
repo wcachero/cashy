@@ -7,11 +7,12 @@ import { Receivable } from '../../models/budget.model';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PeriodFilterComponent } from '../../shared/period-filter.component';
 import { PhpPipe } from '../../shared/php.pipe';
+import { WarningPopupComponent } from '../../shared/warning-popup.component';
 
 @Component({
   selector: 'app-receivables',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PhpPipe, PeriodFilterComponent, LucideHandCoins, LucidePlus, LucideTrash2],
+  imports: [PhpPipe, PeriodFilterComponent, WarningPopupComponent, LucideHandCoins, LucidePlus, LucideTrash2],
   template: `
     <section>
       <p class="text-sm text-slate-400">Money other people owe you</p>
@@ -66,9 +67,7 @@ import { PhpPipe } from '../../shared/php.pipe';
           <svg lucidePlus [size]="16"></svg> Add
         </button>
       </div>
-      @if (error()) {
-        <p class="text-sm text-rose-300 sm:col-span-2 lg:col-span-6">{{ error() }}</p>
-      }
+      <app-warning [message]="error()" (closed)="error.set('')" />
       @if (notice()) {
         <p class="text-sm text-emerald-300 sm:col-span-2 lg:col-span-6">{{ notice() }}</p>
       }
@@ -227,7 +226,11 @@ export class ReceivablesComponent {
 
   receive(id: string, raw: string): void {
     const message = this.budget.recordReceivablePayment(id, parseMoney(raw));
-    this.notice.set(message || 'Enter a payment that is still owed.');
+    if (!message) {
+      this.error.set('Enter a payment that is still owed.');
+      return;
+    }
+    this.notice.set(message);
     this.error.set('');
   }
 }

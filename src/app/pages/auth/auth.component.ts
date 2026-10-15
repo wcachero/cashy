@@ -4,11 +4,12 @@ import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { AuthService } from '../../services/auth.service';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { ThemeToggleComponent } from '../../shared/theme-toggle.component';
+import { WarningPopupComponent } from '../../shared/warning-popup.component';
 
 @Component({
   selector: 'app-auth',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ThemeToggleComponent],
+  imports: [ThemeToggleComponent, WarningPopupComponent],
   template: `
     <main class="grid min-h-screen place-items-center px-4 py-10">
       <section class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl shadow-black/30">
@@ -69,9 +70,7 @@ import { ThemeToggleComponent } from '../../shared/theme-toggle.component';
               <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 uppercase tracking-[0.2em]" autocomplete="off" spellcheck="false" [value]="challengeAnswer()" (input)="challengeAnswer.set(inputValue($event))" />
             </label>
           }
-          @if (error()) {
-            <p class="text-sm text-rose-300">{{ error() }}</p>
-          }
+          <app-warning [message]="error()" (closed)="error.set('')" />
           <button type="submit" class="w-full rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60" [disabled]="busy()">
             {{ busy() ? 'Please wait…' : mode() === 'login' ? 'Sign in' : 'Create account' }}
           </button>

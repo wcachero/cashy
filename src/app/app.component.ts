@@ -20,6 +20,7 @@ import { BudgetStateService } from './services/budget-state.service';
 import { DueNotificationService } from './services/due-notification.service';
 import { PhpPipe } from './shared/php.pipe';
 import { ThemeToggleComponent } from './shared/theme-toggle.component';
+import { ModalComponent } from './shared/modal.component';
 
 @Component({
   selector: 'app-root',
@@ -42,6 +43,7 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
     LucideX,
     AuthComponent,
     ThemeToggleComponent,
+    ModalComponent,
   ],
   template: `
     @if (!auth.ready() || (auth.user() && !budget.loaded())) {
@@ -144,9 +146,6 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
 
     <main class="min-h-screen md:pl-64">
       <div class="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:px-8 md:pb-12 md:pt-8">
-        @if (budget.saveError()) {
-          <p class="mb-4 rounded-2xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">{{ budget.saveError() }}</p>
-        }
         <router-outlet />
       </div>
     </main>
@@ -164,7 +163,7 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
           <ul class="mt-3 max-h-[min(24rem,60vh)] space-y-2 overflow-y-auto">
             @for (due of budget.upcomingDues(); track due.liabilityId + due.dueDate) {
               <li>
-                <a routerLink="/dashboard" class="block rounded-2xl border border-amber-300/30 bg-amber-300/10 px-3 py-2.5" (click)="notificationsOpen.set(false)">
+                <a routerLink="/dashboard" class="block rounded-2xl border border-amber-300/30 bg-amber-300/10 px-3 py-2.5" (click)="closeNotificationsLater()">
                   <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80">{{ duePhrase(due.daysUntil) }}</p>
                   <p class="mt-1 text-sm font-semibold">{{ due.name }}</p>
                   <p class="mt-1 font-mono text-xs text-amber-50/80">{{ due.suggestedAmount | php }} · {{ shortDate(due.dueDate) }}</p>
@@ -173,7 +172,7 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
             }
             @for (item of budget.pastDueLiabilities(); track item.id) {
               <li>
-                <a routerLink="/debts" class="block rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2.5" (click)="notificationsOpen.set(false)">
+                <a routerLink="/debts" class="block rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2.5" (click)="closeNotificationsLater()">
                   <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-200">Past due</p>
                   <p class="mt-1 text-sm font-semibold">{{ item.name }}</p>
                   <p class="mt-1 font-mono text-xs text-rose-100">{{ item.totalBalance | php }} still unpaid</p>
@@ -215,14 +214,14 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
       </nav>
     }
 
-    <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#07111f]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Primary">
-      <div class="grid grid-cols-6">
+    <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#07111f]/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Primary">
+      <div class="grid grid-cols-5 gap-1">
         @for (item of bottomNav; track item.path) {
           <a
             [routerLink]="item.path"
-            routerLinkActive="text-emerald-300"
+            routerLinkActive="nav-tab-active"
             [routerLinkActiveOptions]="{ exact: true }"
-            class="flex flex-col items-center gap-1 px-1 py-2.5 text-center text-[10px] font-medium leading-tight text-slate-400"
+            class="flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-center text-[10px] font-medium leading-tight text-slate-400"
           >
             @switch (item.icon) {
               @case ('dashboard') { <svg lucideLayoutDashboard [size]="18"></svg> }
@@ -233,11 +232,28 @@ import { ThemeToggleComponent } from './shared/theme-toggle.component';
               @case ('owes') { <svg lucideHandCoins [size]="18"></svg> }
               @case ('settings') { <svg lucideSettings [size]="18"></svg> }
             }
-            {{ item.label }}
+            {{ item.shortLabel }}
           </a>
         }
       </div>
     </nav>
+
+    <app-modal [open]="incomePrompt()" (closed)="dismissIncome()">
+      <h2 class="text-xl font-bold">Set up income first</h2>
+      <p class="mt-2 text-sm text-slate-400">
+        This account has no income yet. Add a salary cutoff so free cash and cutoff totals can be calculated.
+      </p>
+      <div class="mt-5 flex flex-wrap gap-2">
+        <a routerLink="/income" class="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="dismissIncome(true)">Set up income</a>
+        <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="dismissIncome()">Not now</button>
+      </div>
+    </app-modal>
+
+    <app-modal [open]="savePrompt()" (closed)="dismissSaveError()">
+      <h2 class="text-xl font-bold">Could not save</h2>
+      <p class="mt-2 text-sm text-rose-200">{{ budget.saveError() }}</p>
+      <button type="button" class="mt-5 rounded-2xl bg-white px-4 py-2 text-sm font-bold text-slate-950" (click)="dismissSaveError()">Close</button>
+    </app-modal>
     }
   `,
 })
@@ -249,6 +265,10 @@ export class AppComponent {
   readonly duePhrase = duePhrase;
   readonly notificationsOpen = signal(false);
   readonly menuOpen = signal(false);
+  readonly incomePrompt = signal(false);
+  readonly savePrompt = signal(false);
+  private incomeDismissed = false;
+  private saveDismissed = false;
   readonly nav = [
     { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { path: '/cutoffs', label: 'Cutoffs', icon: 'cutoffs' },
@@ -258,7 +278,9 @@ export class AppComponent {
     { path: '/owes-you', label: 'Owes you', icon: 'owes' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
-  readonly bottomNav = this.nav.filter((item) => item.icon !== 'income');
+  readonly bottomNav = this.nav
+    .filter((item) => item.icon !== 'income' && item.icon !== 'settings')
+    .map((item) => ({ ...item, shortLabel: item.icon === 'debts' ? 'Expenses' : item.label }));
 
   constructor() {
     inject(DueNotificationService);
@@ -267,6 +289,11 @@ export class AppComponent {
       if (!this.auth.user() || !this.budget.loaded()) return;
       const count = this.budget.upcomingDues().length;
       document.title = count > 0 ? `(${count} due) Cashy` : 'Cashy';
+      const noIncome = this.budget.incomeStreams().length === 0;
+      const saveError = this.budget.saveError();
+      this.incomePrompt.set(noIncome && !this.incomeDismissed);
+      if (!saveError) this.saveDismissed = false;
+      this.savePrompt.set(Boolean(saveError) && !this.saveDismissed);
     });
   }
 
@@ -290,11 +317,33 @@ export class AppComponent {
     setTimeout(() => this.menuOpen.set(false));
   }
 
+  closeNotificationsLater(): void {
+    setTimeout(() => this.notificationsOpen.set(false));
+  }
+
   alertCount(): number {
     return this.budget.upcomingDues().length + this.budget.pastDueLiabilities().length;
   }
 
+  dismissIncome(defer = false): void {
+    const close = () => {
+      this.incomeDismissed = true;
+      this.incomePrompt.set(false);
+    };
+    if (defer) setTimeout(close);
+    else close();
+  }
+
+  dismissSaveError(): void {
+    this.saveDismissed = true;
+    this.savePrompt.set(false);
+  }
+
   async logout(): Promise<void> {
+    this.incomeDismissed = false;
+    this.saveDismissed = false;
+    this.incomePrompt.set(false);
+    this.savePrompt.set(false);
     this.budget.pauseSaves();
     await this.auth.logout();
     document.title = 'Cashy';

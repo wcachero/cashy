@@ -4,11 +4,12 @@ import { formatShortDate } from '../../core/dates';
 import { parseMoney } from '../../core/money';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PhpPipe } from '../../shared/php.pipe';
+import { WarningPopupComponent } from '../../shared/warning-popup.component';
 
 @Component({
   selector: 'app-savings',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PhpPipe, LucidePiggyBank, LucidePlus, LucideTrash2],
+  imports: [PhpPipe, WarningPopupComponent, LucidePiggyBank, LucidePlus, LucideTrash2],
   template: `
     <section>
       <p class="text-sm text-slate-400">Money set aside</p>
@@ -80,9 +81,7 @@ import { PhpPipe } from '../../shared/php.pipe';
             <svg lucidePlus [size]="16"></svg> Add savings
           </button>
         </div>
-        @if (error()) {
-          <p class="text-sm text-rose-300 sm:col-span-2 lg:col-span-4">{{ error() }}</p>
-        }
+        <app-warning [message]="error()" (closed)="error.set('')" />
       </form>
 
       @if (budget.bankSavings().length === 0) {

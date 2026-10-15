@@ -57,8 +57,8 @@ import { ModalComponent } from '../../shared/modal.component';
       </label>
       <button type="button" class="rounded-3xl border border-rose-400/30 bg-rose-400/10 p-5 text-left" (click)="confirmReset.set(true)">
         <svg lucideRotateCcw [size]="20" class="text-rose-200"></svg>
-        <h2 class="mt-3 font-bold">Reset to default plan</h2>
-        <p class="mt-1 text-sm text-rose-100/80">Restore the October 15, 2026 financial plan.</p>
+        <h2 class="mt-3 font-bold">Clear plan</h2>
+        <p class="mt-1 text-sm text-rose-100/80">Remove income, debts, expenses, savings, and cutoffs.</p>
       </button>
     </section>
 
@@ -67,12 +67,12 @@ import { ModalComponent } from '../../shared/modal.component';
     </p>
 
     <app-modal [open]="confirmReset()" (closed)="confirmReset.set(false)">
-      <h2 class="text-xl font-bold">Reset to the default plan?</h2>
+      <h2 class="text-xl font-bold">Clear this plan?</h2>
       <p class="mt-2 text-sm text-slate-400">
-        This puts back the Oct 15, 2026 balances, the paycheck cycles through Oct 25, 2027, and clears every paid checkbox. The copy in SQLite is replaced. A file you already downloaded is not affected.
+        This removes income, debts, expenses, savings, cutoffs, and money owed to you from this account. A file you already downloaded stays as it is.
       </p>
       <div class="mt-5 flex flex-wrap gap-2">
-        <button type="button" class="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="reset()">Reset plan</button>
+        <button type="button" class="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="reset()">Clear plan</button>
         <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="confirmReset.set(false)">Keep my data</button>
       </div>
     </app-modal>
@@ -133,6 +133,6 @@ export class SettingsComponent {
   reset(): void {
     this.budget.resetToSeed();
     this.confirmReset.set(false);
-    this.message.set('Default financial plan restored.');
+    this.message.set('Plan cleared.');
   }
 }

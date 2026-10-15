@@ -16,6 +16,7 @@ import { BudgetStateService } from '../../services/budget-state.service';
 import { ModalComponent } from '../../shared/modal.component';
 import { PeriodFilterComponent } from '../../shared/period-filter.component';
 import { PhpPipe } from '../../shared/php.pipe';
+import { WarningPopupComponent } from '../../shared/warning-popup.component';
 
 interface EditorState {
   mode: 'add' | 'edit' | 'pay';
@@ -41,7 +42,7 @@ interface EditorState {
 @Component({
   selector: 'app-debt-inventory',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, PhpPipe, PeriodFilterComponent, ModalComponent, LucidePlus, LucidePencil, LucideTrash2, LucideHandCoins, LucideX],
+  imports: [NgClass, PhpPipe, PeriodFilterComponent, ModalComponent, WarningPopupComponent, LucidePlus, LucidePencil, LucideTrash2, LucideHandCoins, LucideX],
   template: `
     <section class="flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -166,9 +167,6 @@ interface EditorState {
         </div>
 
         @if (form.mode === 'pay') {
-          @if (formError()) {
-            <p class="mt-3 text-sm text-rose-300">{{ formError() }}</p>
-          }
           <p class="mt-2 text-sm text-slate-400">
             This reduces the balance now. If the same bill is still on a cutoff, lower that planned amount so it is not counted twice.
           </p>
@@ -185,9 +183,6 @@ interface EditorState {
             <button type="button" class="rounded-full bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="savePayment()">Save payment</button>
           </div>
         } @else {
-          @if (formError()) {
-            <p class="mt-3 text-sm text-rose-300">{{ formError() }}</p>
-          }
           <div class="mt-4 grid gap-3 sm:grid-cols-2">
             <label class="block text-sm sm:col-span-2">
               Name
@@ -278,6 +273,8 @@ interface EditorState {
         </div>
       }
     </app-modal>
+
+    <app-warning [message]="formError()" (closed)="formError.set('')" />
   `,
 })
 export class DebtInventoryComponent {

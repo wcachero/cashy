@@ -1,11 +1,11 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { CATEGORY_META, defaultCutoff } from '../core/categories';
 import { daysBetween, formatLongDate, formatMonthYear, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
 import { snapshotFromImport } from '../core/finance-export';
 import { formatPhp, round2 } from '../core/money';
-import { GIRLIE_ID, cloneSnapshot, createSeedSnapshot, dueDateForCutoff } from '../data/seed-data';
+import { GIRLIE_ID, cloneSnapshot, dueDateForCutoff } from '../data/seed-data';
 import { AuthService } from './auth.service';
 import {
   AssignedCutoff,
@@ -64,11 +64,14 @@ export class BudgetStateService {
   private readonly seeded = cloneSnapshot();
   private acceptSaves = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private revision = 0;
 
   readonly incomeStreams = signal<IncomeStream[]>(this.seeded.incomeStreams);
   readonly liabilities = signal<LiabilityItem[]>(this.seeded.liabilities);
   readonly paycheckCycles = signal<PaycheckCycle[]>(this.seeded.paycheckCycles);
   readonly notificationsEnabled = signal(this.seeded.notificationsEnabled);
+  readonly hideDebtTotal = signal(Boolean(this.seeded.hideDebtTotal));
+  readonly hideSavingsTotal = signal(Boolean(this.seeded.hideSavingsTotal));
   readonly bankSavings = signal<BankSaving[]>(this.seeded.bankSavings ?? []);
   readonly receivables = signal<Receivable[]>(this.seeded.receivables ?? []);
   readonly loaded = signal(false);
@@ -147,7 +150,7 @@ export class BudgetStateService {
   readonly monthlyFixedObligations = computed(() =>
     round2(
       this.liabilities()
-        .filter((item) => item.status !== 'PAID' && (item.category === 'LIVING_EXPENSE' || item.category === 'FIXED_LOAN'))
+        .filter((item) => item.status !== 'PAID' && (item.category === 'LIVING_EXPENSE' || item.category === 'FIXED_LOAN') && activeInMonth(item, todayIso()))
         .reduce((sum, item) => sum + item.monthlyAmortization, 0),
     ),
   );
@@ -156,30 +159,47 @@ export class BudgetStateService {
 
   readonly freeCashSteps = computed<FreeCashStep[]>(() => {
     const streams = this.incomeStreams();
-    const living = this.liabilities().filter((item) => item.status !== 'PAID' && item.category === 'LIVING_EXPENSE');
-    const loans = this.liabilities()
-      .filter((item) => item.status !== 'PAID' && item.category === 'FIXED_LOAN')
-      .map((item) => ({ item, end: item.endDate ?? termEnd(item) }))
-      .filter((entry): entry is { item: LiabilityItem; end: string } => !!entry.end)
-      .sort((a, b) => a.end.localeCompare(b.end) || a.item.name.localeCompare(b.item.name));
-    const livingCost = living.reduce((sum, item) => sum + item.monthlyAmortization, 0);
-    const amountFor = (onDate: string, dropped: Set<string>) =>
+    const tracked = this.liabilities().filter(
+      (item) => item.status !== 'PAID' && (item.category === 'LIVING_EXPENSE' || item.category === 'FIXED_LOAN'),
+    );
+    const amountFor = (onDate: string) =>
       round2(
         monthlyIncomeOn(streams, onDate) -
-          livingCost -
-          loans.filter((entry) => !dropped.has(entry.item.id)).reduce((sum, entry) => sum + entry.item.monthlyAmortization, 0),
+          tracked.filter((item) => activeInMonth(item, onDate)).reduce((sum, item) => sum + item.monthlyAmortization, 0),
       );
+    const today = todayIso();
+    const notes = new Map<string, string[]>();
+    const add = (iso: string, note: string) => {
+      const key = `${iso.slice(0, 7)}-01`;
+      if (key <= today.slice(0, 7)) return;
+      const list = notes.get(key) ?? [];
+      list.push(note);
+      notes.set(key, list);
+    };
+    for (const item of tracked) {
+      if (item.startDate.slice(0, 7) > today.slice(0, 7)) add(item.startDate, `${item.name} starts`);
+      const end = item.endDate ?? termEnd(item);
+      if (end) add(shiftMonth(end, 1, 1), `${item.name} finished`);
+    }
+    for (const stream of streams) {
+      const months = stream.remainingMonths ?? 0;
+      if (stream.cutoffType === '30TH_INFLOW' && months > 0) {
+        const last = shiftMonth(today, months - 1, stream.dayOfMonth);
+        add(shiftMonth(last, 1, 1), `${stream.name} ends`);
+      }
+    }
     const steps: FreeCashStep[] = [
-      { label: 'Now', detail: 'After living costs and active loans', amount: amountFor(todayIso(), new Set()) },
+      { label: 'Now', detail: 'Living costs and loans active this month', amount: amountFor(today) },
     ];
-    const dropped = new Set<string>();
-    for (const entry of loans) {
-      dropped.add(entry.item.id);
-      steps.push({
-        label: formatMonthYear(entry.end),
-        detail: `${entry.item.name} finished`,
-        amount: amountFor(entry.end, dropped),
-      });
+    for (const [iso, list] of [...notes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const amount = amountFor(iso);
+      const previous = steps.at(-1);
+      if (previous && previous.label !== 'Now' && previous.amount === amount) {
+        previous.detail = `${previous.detail}. ${list.join(', ')}`;
+        previous.label = formatMonthYear(iso);
+        continue;
+      }
+      steps.push({ label: formatMonthYear(iso), detail: list.join(', '), amount });
     }
     return steps;
   });
@@ -294,11 +314,24 @@ export class BudgetStateService {
 
   private queueSave(snapshot: BudgetSnapshot): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      void firstValueFrom(this.http.put('/api/plan', snapshot, { headers: this.auth.headers() }))
-        .then(() => this.saveError.set(''))
-        .catch(() => this.saveError.set('Could not save to SQLite. Leave this page open and check that the API is running.'));
-    }, 400);
+    this.saveTimer = setTimeout(() => this.sendSave(snapshot), 400);
+  }
+
+  flushSave(): void {
+    if (!this.acceptSaves) return;
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.sendSave(this.exportSnapshot());
+  }
+
+  private sendSave(snapshot: BudgetSnapshot): void {
+    const payload: BudgetSnapshot = { ...snapshot, revision: ++this.revision };
+    void firstValueFrom(this.http.put('/api/plan', payload, { headers: this.auth.headers() }))
+      .then(() => this.saveError.set(''))
+      .catch((error: unknown) => {
+        if (error instanceof HttpErrorResponse && error.status === 409) return;
+        this.saveError.set('Could not save to SQLite. Leave this page open and check that the API is running.');
+      });
   }
 
   private applySnapshot(snapshot: BudgetSnapshot): void {
@@ -308,6 +341,9 @@ export class BudgetStateService {
     this.notificationsEnabled.set(Boolean(snapshot.notificationsEnabled));
     this.bankSavings.set(snapshot.bankSavings ?? []);
     this.receivables.set(snapshot.receivables ?? []);
+    if (typeof snapshot.hideDebtTotal === 'boolean') this.hideDebtTotal.set(snapshot.hideDebtTotal);
+    if (typeof snapshot.hideSavingsTotal === 'boolean') this.hideSavingsTotal.set(snapshot.hideSavingsTotal);
+    if (typeof snapshot.revision === 'number' && snapshot.revision > this.revision) this.revision = snapshot.revision;
   }
 
   cycleInflow(cycle: PaycheckCycle): number {
@@ -562,33 +598,55 @@ export class BudgetStateService {
     this.applyStreamToCycles(stream);
   }
 
-  updateIncome(id: string, patch: { amount?: number; remainingMonths?: number }): void {
+  updateIncome(
+    id: string,
+    patch: {
+      name?: string;
+      amount?: number;
+      dayOfMonth?: number;
+      cutoffType?: IncomeStream['cutoffType'];
+      remainingMonths?: number;
+      specificDate?: string;
+    },
+  ): void {
     const current = this.incomeStreams().find((stream) => stream.id === id);
     if (!current) return;
-    const amount = patch.amount != null ? round2(Math.max(0, patch.amount)) : current.amount;
-    this.incomeStreams.update((list) =>
-      list.map((stream) =>
-        stream.id === id
-          ? {
-              ...stream,
-              amount,
-              remainingMonths: patch.remainingMonths != null ? Math.max(0, Math.round(patch.remainingMonths)) : stream.remainingMonths,
-            }
-          : stream,
-      ),
-    );
-    if (patch.amount == null) return;
+    const next: IncomeStream = {
+      ...current,
+      name: patch.name?.trim() || current.name,
+      amount: patch.amount != null ? round2(Math.max(0, patch.amount)) : current.amount,
+      dayOfMonth: patch.dayOfMonth != null ? Math.min(31, Math.max(1, Math.round(patch.dayOfMonth))) : current.dayOfMonth,
+      cutoffType: patch.cutoffType ?? current.cutoffType,
+      remainingMonths: patch.remainingMonths != null ? Math.max(0, Math.round(patch.remainingMonths)) : current.remainingMonths,
+      specificDate: patch.specificDate !== undefined ? patch.specificDate || undefined : current.specificDate,
+    };
+    this.incomeStreams.update((list) => list.map((stream) => (stream.id === id ? next : stream)));
+    if (isSalaryCutoff(current.cutoffType) || isSalaryCutoff(next.cutoffType)) {
+      if (isSalaryCutoff(next.cutoffType)) this.ensureSalaryCycles(next.dayOfMonth);
+      const days = new Set([current.dayOfMonth, next.dayOfMonth]);
+      const anchor = todayIso();
+      this.paycheckCycles.update((cycles) =>
+        cycles.map((cycle) => {
+          if (cycle.cutoffDate < anchor) return cycle;
+          for (const day of days) {
+            if (cycleMatchesSalaryDay(cycle.cutoffDate, day)) return { ...cycle, baseIncome: this.salaryTotalForDay(day) };
+          }
+          return cycle;
+        }),
+      );
+      return;
+    }
     const anchor = todayIso();
     this.paycheckCycles.update((cycles) =>
       cycles.map((cycle) => {
         if (cycle.cutoffDate < anchor) return cycle;
         const day = Number(cycle.cutoffDate.slice(8, 10));
-        if (isSalaryCutoff(current.cutoffType) && cycleMatchesSalaryDay(cycle.cutoffDate, current.dayOfMonth)) {
-          return { ...cycle, baseIncome: this.salaryTotalForDay(current.dayOfMonth) };
+        if (next.cutoffType === '30TH_INFLOW' && day === 25) return { ...cycle, supplementaryIncome: next.amount };
+        if ((next.cutoffType === 'BONUS' || next.isOneTime) && next.specificDate === cycle.cutoffDate) {
+          return { ...cycle, supplementaryIncome: next.amount };
         }
-        if (current.cutoffType === '30TH_INFLOW' && day === 25) return { ...cycle, supplementaryIncome: amount };
-        if (current.cutoffType === 'BONUS' && current.specificDate === cycle.cutoffDate) {
-          return { ...cycle, supplementaryIncome: amount };
+        if (current.specificDate && current.specificDate !== next.specificDate && current.specificDate === cycle.cutoffDate) {
+          return { ...cycle, supplementaryIncome: round2(Math.max(0, cycle.supplementaryIncome - current.amount)) };
         }
         return cycle;
       }),
@@ -648,6 +706,14 @@ export class BudgetStateService {
     this.notificationsEnabled.set(enabled);
   }
 
+  toggleDebtHidden(): void {
+    this.hideDebtTotal.update((hidden) => !hidden);
+  }
+
+  toggleSavingsHidden(): void {
+    this.hideSavingsTotal.update((hidden) => !hidden);
+  }
+
   exportSnapshot(): BudgetSnapshot {
     return {
       version: 1,
@@ -657,6 +723,9 @@ export class BudgetStateService {
       notificationsEnabled: this.notificationsEnabled(),
       bankSavings: this.bankSavings(),
       receivables: this.receivables(),
+      hideDebtTotal: this.hideDebtTotal(),
+      hideSavingsTotal: this.hideSavingsTotal(),
+      revision: this.revision,
     };
   }
 
@@ -668,13 +737,16 @@ export class BudgetStateService {
   }
 
   resetToSeed(): void {
-    const seed = createSeedSnapshot();
-    this.incomeStreams.set(seed.incomeStreams);
-    this.liabilities.set(seed.liabilities);
-    this.paycheckCycles.set(seed.paycheckCycles);
-    this.notificationsEnabled.set(false);
-    this.bankSavings.set(seed.bankSavings);
-    this.receivables.set(seed.receivables);
+    this.applySnapshot({
+      version: 1,
+      incomeStreams: [],
+      liabilities: [],
+      paycheckCycles: [],
+      notificationsEnabled: false,
+      bankSavings: [],
+      receivables: [],
+    });
+    this.flushSave();
   }
 
   addBankSaving(draft: { bankName: string; accountName: string; amount: number; notes?: string }): void {
@@ -751,6 +823,12 @@ export class BudgetStateService {
         };
       }),
     );
+    const saved = this.receivables().find((item) => item.id === id);
+    if (!saved || patch.paymentAmount == null) return;
+    const inflow = this.incomeStreams().find(
+      (stream) => stream.cutoffType === '30TH_INFLOW' && stream.name.toLowerCase().includes(saved.name.toLowerCase()),
+    );
+    if (inflow) this.updateIncome(inflow.id, { amount: saved.paymentAmount });
   }
 
   recordReceivablePayment(id: string, amount: number): string {
@@ -929,6 +1007,14 @@ export class BudgetStateService {
 function normalizeDueDay(day: number | undefined): number | undefined {
   if (day == null || !Number.isFinite(day) || day < 1) return undefined;
   return Math.min(31, Math.max(1, Math.round(day)));
+}
+
+function activeInMonth(item: LiabilityItem, iso: string): boolean {
+  if (item.status === 'PAID') return false;
+  const month = iso.slice(0, 7);
+  if (item.startDate.slice(0, 7) > month) return false;
+  if (item.endDate && item.endDate.slice(0, 7) < month) return false;
+  return true;
 }
 
 function termEnd(item: LiabilityItem): string | null {

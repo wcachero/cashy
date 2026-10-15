@@ -171,7 +171,12 @@ app.put('/api/plan', (req, res) => {
   const session = requireUser(req, res);
   if (!session) return;
   if (!isSnapshot(req.body)) return res.status(400).json({ error: 'That plan file is missing income, liabilities, or cutoffs.' });
-  replacePlan(db, session.user.id, req.body);
+  try {
+    replacePlan(db, session.user.id, req.body);
+  } catch (error) {
+    if (error?.code === 'STALE_PLAN') return res.status(409).json({ error: 'A newer plan was already saved.' });
+    throw error;
+  }
   res.json({ ok: true });
 });
 

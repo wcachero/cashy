@@ -138,6 +138,14 @@ function migrate(db) {
 }
 
 export function replacePlan(db, userId, snapshot) {
+  const current = readPlan(db, userId);
+  const incoming = Number(snapshot?.revision ?? 0);
+  const stored = Number(current?.revision ?? 0);
+  if (incoming < stored) {
+    const error = new Error('A newer plan was already saved.');
+    error.code = 'STALE_PLAN';
+    throw error;
+  }
   const now = new Date().toISOString();
   const wipe = db.transaction(() => {
     db.prepare('DELETE FROM income_streams WHERE user_id = ?').run(userId);

@@ -1,11 +1,13 @@
-import { ChangeDetectionStrategy, Component, HostListener, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, OnDestroy, effect, input, output } from '@angular/core';
+
+const modalStack: ModalComponent[] = [];
 
 @Component({
   selector: 'app-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
-      <div class="fixed inset-0 z-[70] flex items-end justify-center p-3 sm:items-center sm:p-6">
+      <div class="fixed inset-0 flex items-end justify-center p-3 sm:items-center sm:p-6" [style.z-index]="layer()">
         <button type="button" class="absolute inset-0 bg-slate-950/75 backdrop-blur-sm" (click)="closed.emit()" aria-label="Close dialog"></button>
         <div
           role="dialog"
@@ -18,12 +20,27 @@ import { ChangeDetectionStrategy, Component, HostListener, input, output } from 
     }
   `,
 })
-export class ModalComponent {
+export class ModalComponent implements OnDestroy {
   readonly open = input(false);
+  readonly layer = input(70);
   readonly closed = output<void>();
+
+  constructor() {
+    effect(() => {
+      const isOpen = this.open();
+      const index = modalStack.indexOf(this);
+      if (isOpen && index < 0) modalStack.push(this);
+      if (!isOpen && index >= 0) modalStack.splice(index, 1);
+    });
+  }
+
+  ngOnDestroy(): void {
+    const index = modalStack.indexOf(this);
+    if (index >= 0) modalStack.splice(index, 1);
+  }
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
-    if (this.open()) this.closed.emit();
+    if (this.open() && modalStack.at(-1) === this) this.closed.emit();
   }
 }

@@ -148,3 +148,14 @@ html[data-theme='light'] textarea {
   background-color: #fff;
   color: #0f172a;
 }
+
+.nav-tab-active {
+  background-color: #34d399;
+  color: #022c22;
+  font-weight: 700;
+}
+
+html[data-theme='light'] .nav-tab-active {
+  background-color: #059669;
+  color: #ffffff;
+}

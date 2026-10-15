@@ -62,6 +62,17 @@ async function handleApi(request, env, url) {
     if (!session) return json({ error: 'Sign in required.' }, 401);
     const snapshot = await readJson(request);
     if (!isSnapshot(snapshot)) return json({ error: 'That plan file is missing income, liabilities, or cutoffs.' }, 400);
+    const currentRow = await env.DB.prepare('SELECT snapshot_json FROM plans WHERE user_id = ?').bind(session.user.id).first();
+    let stored = 0;
+    if (currentRow?.snapshot_json) {
+      try {
+        stored = Number(JSON.parse(currentRow.snapshot_json).revision ?? 0);
+      } catch {
+        stored = 0;
+      }
+    }
+    const incoming = Number(snapshot.revision ?? 0);
+    if (incoming < stored) return json({ error: 'A newer plan was already saved.' }, 409);
     const encoded = JSON.stringify(snapshot);
     if (encoded.length > MAX_SNAPSHOT_BYTES) {
       return json({ error: 'This plan is too large for the free D1 database.' }, 413);

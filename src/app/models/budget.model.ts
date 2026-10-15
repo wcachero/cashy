@@ -119,6 +119,9 @@ export interface BudgetSnapshot {
   notificationsEnabled: boolean;
   bankSavings: BankSaving[];
   receivables: Receivable[];
+  hideDebtTotal?: boolean;
+  hideSavingsTotal?: boolean;
+  revision?: number;
 }
 
 export interface UpcomingDue {

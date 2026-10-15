@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { LucideArrowUpRight, LucideCircleAlert, LucideSparkles, LucideTarget, LucideTriangleAlert } from '@lucide/angular';
+import { LucideArrowUpRight, LucideCircleAlert, LucideEye, LucideEyeOff, LucideSparkles, LucideTarget } from '@lucide/angular';
 import { CATEGORY_META } from '../../core/categories';
-import { duePhrase, formatLongDate, formatShortDate, formatWeekday, today, todayIso } from '../../core/dates';
+import { formatLongDate, formatShortDate, formatWeekday, today, todayIso } from '../../core/dates';
 import { collectYears, dateInPeriod, rangeOverlapsPeriod } from '../../core/period';
 import { round2 } from '../../core/money';
-import { DebtSlice, FreeCashStep, LiabilityCategory, UpcomingDue } from '../../models/budget.model';
+import { DebtSlice, FreeCashStep, LiabilityCategory } from '../../models/budget.model';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PeriodFilterComponent } from '../../shared/period-filter.component';
 import { PhpPipe } from '../../shared/php.pipe';
@@ -13,7 +13,7 @@ import { PhpPipe } from '../../shared/php.pipe';
 @Component({
   selector: 'app-dashboard',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, PhpPipe, PeriodFilterComponent, LucideTriangleAlert, LucideTarget, LucideSparkles, LucideArrowUpRight, LucideCircleAlert],
+  imports: [RouterLink, PhpPipe, PeriodFilterComponent, LucideTarget, LucideSparkles, LucideArrowUpRight, LucideCircleAlert, LucideEye, LucideEyeOff],
   template: `
     <section class="flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -31,59 +31,7 @@ import { PhpPipe } from '../../shared/php.pipe';
       }
     </section>
 
-    @if (planIsEmpty()) {
-      <section class="mt-6 rounded-3xl border border-sky-400/30 bg-sky-400/10 p-5">
-        <h2 class="text-lg font-bold">Import your plan</h2>
-        <p class="mt-2 max-w-2xl text-sm text-sky-100/90">
-          This account starts empty. In Settings, import <span class="font-mono">financial-plan-2026-10-15.json</span> to load your income, debts, expenses, and cutoffs.
-        </p>
-        <a routerLink="/settings" class="mt-4 inline-flex rounded-2xl bg-white px-4 py-2 text-sm font-bold text-slate-950">Open Settings</a>
-      </section>
-    }
-
-    @if (!periodOn()) {
-      @if (budget.upcomingDues().length) {
-      <section class="mt-6 space-y-3" aria-label="Bills due within 7 days">
-        @for (due of budget.upcomingDues(); track due.liabilityId + due.dueDate) {
-          <article class="flex flex-col gap-4 rounded-3xl border border-amber-300/30 bg-amber-300/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex gap-3">
-              <span class="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-300 text-slate-950">
-                <svg lucideTriangleAlert [size]="18"></svg>
-              </span>
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-amber-100/80">{{ duePhrase(due.daysUntil) }}</p>
-                <h2 class="text-lg font-bold">{{ due.name }}</h2>
-                <p class="mt-1 text-sm text-amber-50/80">
-                  @if (showsMinimum(due)) {
-                    Pay the {{ due.minimumDue | php }} minimum on {{ longDate(due.dueDate) }}, or {{ due.fullBalance | php }} to clear it.
-                  } @else if (minimumLogged(due)) {
-                    Minimum is logged. {{ due.fullBalance | php }} remains and is already planned on the next cutoff.
-                  } @else if (due.fullBalance > 0 && due.category !== 'LIVING_EXPENSE') {
-                    {{ due.suggestedAmount | php }} is lined up for {{ longDate(due.dueDate) }}.
-                  } @else {
-                    {{ due.suggestedAmount | php }} is due {{ longDate(due.dueDate) }}.
-                  }
-                </p>
-              </div>
-            </div>
-            @if (showsMinimum(due)) {
-              <button type="button" class="rounded-2xl bg-amber-300 px-4 py-2.5 text-sm font-bold text-slate-950" (click)="logMinimum(due)">
-                Log {{ due.minimumDue | php }} minimum
-              </button>
-            }
-          </article>
-        }
-        @if (notice()) {
-          <p class="text-sm text-emerald-300">{{ notice() }}</p>
-        }
-      </section>
-    } @else {
-      <section class="mt-6 flex items-center gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-        <svg lucideCircleAlert [size]="18" class="text-emerald-300"></svg>
-        Nothing is due in the next 7 days.
-      </section>
-    }
-    } @else if (periodBills().length) {
+    @if (periodOn() && periodBills().length) {
       <section class="mt-6 space-y-3" aria-label="Bills in the selected period">
         @for (item of periodBills(); track item.id) {
           <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-4">
@@ -93,33 +41,54 @@ import { PhpPipe } from '../../shared/php.pipe';
           </article>
         }
       </section>
-    } @else {
+    } @else if (periodOn()) {
       <section class="mt-6 flex items-center gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
         <svg lucideCircleAlert [size]="18" class="text-emerald-300"></svg>
         Nothing is due in this period.
       </section>
     }
 
-    @if (pastDueList().length) {
-      <section class="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Past due loans">
-        @for (item of pastDueList(); track item.id) {
-          <a routerLink="/debts" class="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-4 py-3">
-            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-rose-200">Past due</p>
-            <p class="mt-1 font-semibold">{{ item.name }}</p>
-            <p class="font-mono text-sm text-rose-100">{{ item.totalBalance | php }} · settle {{ item.endDate ? longDate(item.endDate) : 'soon' }}</p>
-          </a>
-        }
-      </section>
-    }
-
     <section class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-4">
-        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Total debt remaining</p>
-        <p class="mt-3 font-mono text-2xl font-semibold text-rose-200">{{ debtRemaining() | php }}</p>
-        <div class="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-          <div class="h-full rounded-full bg-emerald-400" [style.width.%]="paidPercent()"></div>
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Total debt remaining</p>
+          <button type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 text-slate-300" [attr.aria-label]="budget.hideDebtTotal() ? 'Show total debt' : 'Hide total debt'" (click)="budget.toggleDebtHidden()">
+            @if (budget.hideDebtTotal()) {
+              <svg lucideEyeOff [size]="16"></svg>
+            } @else {
+              <svg lucideEye [size]="16"></svg>
+            }
+          </button>
         </div>
-        <p class="mt-2 text-xs text-slate-400">{{ paidPercent().toFixed(1) }}% of {{ debtOriginal() | php }} paid off</p>
+        @if (budget.hideDebtTotal()) {
+          <p class="mt-3 font-mono text-2xl font-semibold tracking-[0.2em] text-slate-500">••••••</p>
+          <p class="mt-2 text-xs text-slate-400">Amount hidden</p>
+        } @else {
+          <p class="mt-3 font-mono text-2xl font-semibold text-rose-200">{{ debtRemaining() | php }}</p>
+          <div class="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+            <div class="h-full rounded-full bg-emerald-400" [style.width.%]="paidPercent()"></div>
+          </div>
+          <p class="mt-2 text-xs text-slate-400">{{ paidPercent().toFixed(1) }}% of {{ debtOriginal() | php }} paid off</p>
+        }
+      </article>
+
+      <article class="rounded-3xl border border-white/10 bg-slate-900/70 p-4">
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Total savings</p>
+          <button type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 text-slate-300" [attr.aria-label]="budget.hideSavingsTotal() ? 'Show total savings' : 'Hide total savings'" (click)="budget.toggleSavingsHidden()">
+            @if (budget.hideSavingsTotal()) {
+              <svg lucideEyeOff [size]="16"></svg>
+            } @else {
+              <svg lucideEye [size]="16"></svg>
+            }
+          </button>
+        </div>
+        @if (budget.hideSavingsTotal()) {
+          <p class="mt-3 font-mono text-2xl font-semibold tracking-[0.2em] text-slate-500">••••••</p>
+        } @else {
+          <p class="mt-3 font-mono text-2xl font-semibold text-emerald-200">{{ budget.totalSavings() | php }}</p>
+        }
+        <p class="mt-2 text-xs text-slate-400">Cutoff leftover plus other banks.</p>
       </article>
 
       @if (girlieVisible(); as person) {
@@ -144,8 +113,8 @@ import { PhpPipe } from '../../shared/php.pipe';
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Monthly free cash</p>
         <p class="mt-3 font-mono text-2xl font-semibold text-sky-200">{{ budget.monthlyFreeCashFlow() | php }}</p>
         <p class="mt-2 text-xs text-slate-400">
-          After living costs and fixed loans.
-          @if (laterCash(); as step) { Rises to {{ step.amount | php }} by {{ step.label }}. }
+          After living costs and loans active this month.
+          @if (risingCash(); as step) { Rises to {{ step.amount | php }} by {{ step.label }}. }
         </p>
       </article>
 
@@ -251,8 +220,6 @@ export class DashboardComponent {
   readonly todayLabel = formatWeekday(today());
   readonly shortDate = formatShortDate;
   readonly longDate = formatLongDate;
-  readonly duePhrase = duePhrase;
-  readonly notice = signal('');
   readonly month = signal('all');
   readonly year = signal('all');
   private readonly debtCategories: LiabilityCategory[] = ['REVOLVING_CC', 'ONE_TIME_OLA', 'PAST_DUE_OLA', 'FIXED_LOAN', 'PERSONAL_DEBT'];
@@ -275,10 +242,6 @@ export class DashboardComponent {
   );
 
   readonly periodBills = computed(() => this.periodLiabilities().filter((item) => item.status !== 'PAID'));
-
-  readonly pastDueList = computed(() =>
-    this.budget.pastDueLiabilities().filter((item) => rangeOverlapsPeriod(item.startDate, item.endDate, this.month(), this.year())),
-  );
 
   readonly debtRemaining = computed(() =>
     round2(
@@ -344,10 +307,6 @@ export class DashboardComponent {
     return this.budget.paycheckCycles().filter((cycle) => dateInPeriod(cycle.cutoffDate, this.month(), this.year()));
   });
 
-  planIsEmpty(): boolean {
-    return this.budget.liabilities().length === 0 && this.budget.paycheckCycles().length === 0;
-  }
-
   nextCycles() {
     const cycles = this.budget.paycheckCycles();
     const upcoming = this.budget.upcomingCycle();
@@ -355,9 +314,12 @@ export class DashboardComponent {
     return cycles.slice(Math.max(0, start), Math.max(0, start) + 4);
   }
 
-  laterCash(): FreeCashStep | null {
+  risingCash(): FreeCashStep | null {
     const steps = this.shownSteps();
-    return steps.length > 1 ? (steps.at(-1) ?? null) : null;
+    const now = steps.find((step) => step.label === 'Now') ?? steps[0];
+    const last = steps.at(-1);
+    if (!now || !last || last === now || last.amount <= now.amount) return null;
+    return last;
   }
 
   clearDate(): string | null {
@@ -374,21 +336,5 @@ export class DashboardComponent {
 
   isNegative(amount: number): boolean {
     return amount < 0;
-  }
-
-  showsMinimum(due: UpcomingDue): boolean {
-    return !!due.minimumDue && due.minimumDue < due.fullBalance && !this.minimumLogged(due);
-  }
-
-  minimumLogged(due: UpcomingDue): boolean {
-    const item = this.budget.liabilities().find((entry) => entry.id === due.liabilityId);
-    if (!item?.minimumDue || item.originalBalance == null) return false;
-    return item.totalBalance <= item.originalBalance - item.minimumDue + 0.05;
-  }
-
-  logMinimum(due: UpcomingDue): void {
-    if (!due.minimumDue) return;
-    this.budget.logAdHocPayment(due.liabilityId, due.minimumDue, 'Minimum due');
-    this.notice.set(`${due.name} minimum logged for ${formatLongDate(due.dueDate)}.`);
   }
 }

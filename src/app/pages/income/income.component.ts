@@ -1,16 +1,18 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { LucideHandCoins, LucidePlus, LucideWallet } from '@lucide/angular';
+import { LucideHandCoins, LucidePencil, LucidePlus, LucideWallet } from '@lucide/angular';
 import { formatLongDate, ordinalDay } from '../../core/dates';
 import { parseMoney } from '../../core/money';
 import { CutoffType, IncomeStream, Receivable } from '../../models/budget.model';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PhpPipe } from '../../shared/php.pipe';
+import { ModalComponent } from '../../shared/modal.component';
+import { WarningPopupComponent } from '../../shared/warning-popup.component';
 
 @Component({
   selector: 'app-income',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, PhpPipe, LucideWallet, LucideHandCoins, LucidePlus],
+  imports: [RouterLink, PhpPipe, WarningPopupComponent, ModalComponent, LucideWallet, LucideHandCoins, LucidePlus, LucidePencil],
   template: `
     <section>
       <p class="text-sm text-slate-400">What funds each cutoff</p>
@@ -85,9 +87,7 @@ import { PhpPipe } from '../../shared/php.pipe';
           <svg lucidePlus [size]="16"></svg> Add income
         </button>
       </div>
-      @if (error()) {
-        <p class="text-sm text-rose-300 sm:col-span-2 lg:col-span-4">{{ error() }}</p>
-      }
+      <app-warning [message]="error()" (closed)="error.set('')" />
     </form>
 
     <section class="mt-6">
@@ -97,16 +97,14 @@ import { PhpPipe } from '../../shared/php.pipe';
       } @else {
         <ul class="mt-3 space-y-3">
           @for (stream of budget.salaryIncome(); track stream.id) {
-            <li class="grid gap-3 rounded-3xl border border-white/10 bg-slate-900/70 p-4 sm:grid-cols-[1.4fr_.8fr_auto] sm:items-end">
+            <li class="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-slate-900/70 p-4">
               <div>
                 <p class="font-semibold">{{ stream.name }}</p>
-                <p class="text-xs text-slate-400">Every {{ ordinal(stream.dayOfMonth) }} of the month</p>
+                <p class="text-xs text-slate-400">Every {{ ordinal(stream.dayOfMonth) }} of the month · {{ stream.amount | php }}</p>
               </div>
-              <label class="text-xs text-slate-400">
-                Amount
-                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white" type="number" min="0" step="0.01" [value]="stream.amount" (change)="updateAmount(stream, $event)" />
-              </label>
-              <p class="font-mono text-sm text-emerald-200 sm:pb-2">{{ stream.amount | php }}</p>
+              <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openSalary(stream)">
+                <svg lucidePencil [size]="14"></svg> Update
+              </button>
             </li>
           }
         </ul>
@@ -142,6 +140,9 @@ import { PhpPipe } from '../../shared/php.pipe';
                 </div>
                 <p class="font-mono text-emerald-200">{{ item.paymentAmount | php }}</p>
               </div>
+              <button type="button" class="mt-3 inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOwe(item)">
+                <svg lucidePencil [size]="14"></svg> Update
+              </button>
             </li>
           }
         </ul>
@@ -157,24 +158,14 @@ import { PhpPipe } from '../../shared/php.pipe';
       } @else {
         <ul class="mt-3 space-y-3">
           @for (stream of budget.otherIncome(); track stream.id) {
-            <li class="grid gap-3 rounded-3xl border border-white/10 bg-slate-900/70 p-4 sm:grid-cols-[1.4fr_.8fr_.6fr_auto] sm:items-end">
+            <li class="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-slate-900/70 p-4">
               <div>
                 <p class="font-semibold">{{ stream.name }}</p>
-                <p class="text-xs text-slate-400">{{ otherDetail(stream) }}</p>
+                <p class="text-xs text-slate-400">{{ otherDetail(stream) }} · {{ stream.amount | php }}</p>
               </div>
-              <label class="text-xs text-slate-400">
-                Amount
-                <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white" type="number" min="0" step="0.01" [value]="stream.amount" (change)="updateAmount(stream, $event)" />
-              </label>
-              @if (stream.remainingMonths != null) {
-                <label class="text-xs text-slate-400">
-                  Months left
-                  <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white" type="number" min="0" step="1" [value]="stream.remainingMonths" (change)="updateMonths(stream, $event)" />
-                </label>
-              } @else {
-                <span class="hidden sm:block"></span>
-              }
-              <p class="font-mono text-sm text-emerald-200 sm:pb-2">{{ stream.amount | php }}</p>
+              <button type="button" class="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="openOther(stream)">
+                <svg lucidePencil [size]="14"></svg> Update
+              </button>
             </li>
           }
         </ul>
@@ -184,6 +175,74 @@ import { PhpPipe } from '../../shared/php.pipe';
     @if (notice()) {
       <p class="mt-4 text-sm text-emerald-300">{{ notice() }}</p>
     }
+
+    <app-modal [open]="editing() !== null" (closed)="editing.set(null)">
+      @if (editing(); as form) {
+        <h2 class="text-xl font-bold">Update {{ form.name || 'income' }}</h2>
+        <label class="mt-4 block text-sm">
+          Name
+          <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.name" (input)="patchEdit({ name: text($event) })" />
+        </label>
+        @if (form.kind === 'owe') {
+          <label class="mt-3 block text-sm">
+            Total debt
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.totalDebt" (input)="patchEdit({ totalDebt: text($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Payment each term
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.amount" (input)="patchEdit({ amount: text($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Terms
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="1" step="1" [value]="form.terms" (input)="patchEdit({ terms: text($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Due day
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="1" max="31" step="1" [value]="form.dueDay" (input)="patchEdit({ dueDay: text($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Date borrowed
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.borrowedOn" (input)="patchEdit({ borrowedOn: text($event) })" />
+          </label>
+          <label class="mt-3 block text-sm">
+            Remarks
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.remarks" (input)="patchEdit({ remarks: text($event) })" />
+          </label>
+        } @else {
+          <label class="mt-3 block text-sm">
+            Amount
+            <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="0.01" [value]="form.amount" (input)="patchEdit({ amount: text($event) })" />
+          </label>
+          @if (form.kind === 'salary') {
+            <label class="mt-3 block text-sm">
+              Cutoff
+              <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" [value]="form.payDay" (change)="patchEdit({ payDay: choice($event) })">
+                <option value="10">Every 10th</option>
+                <option value="15">Every 15th</option>
+                <option value="25">Every 25th</option>
+                <option value="30">Every 30th</option>
+              </select>
+            </label>
+          }
+          @if (form.months != null) {
+            <label class="mt-3 block text-sm">
+              Months left
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono" type="number" min="0" step="1" [value]="form.months" (input)="patchEdit({ months: text($event) })" />
+            </label>
+          }
+          @if (form.specificDate != null) {
+            <label class="mt-3 block text-sm">
+              Date received
+              <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2" type="date" [value]="form.specificDate" (input)="patchEdit({ specificDate: text($event) })" />
+            </label>
+          }
+        }
+        <div class="mt-5 flex flex-wrap gap-2">
+          <button type="button" class="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950" (click)="saveEdit()">Save update</button>
+          <button type="button" class="rounded-2xl border border-white/15 px-4 py-2 text-sm" (click)="editing.set(null)">Cancel</button>
+        </div>
+      }
+    </app-modal>
   `,
 })
 export class IncomeComponent {
@@ -200,6 +259,7 @@ export class IncomeComponent {
   readonly borrowedOn = signal('');
   readonly remarks = signal('');
   readonly receivedOn = signal('');
+  readonly editing = signal<IncomeEdit | null>(null);
   readonly longDate = formatLongDate;
 
   isEmpty(): boolean {
@@ -305,14 +365,104 @@ export class IncomeComponent {
     return 'Other income';
   }
 
-  updateAmount(stream: IncomeStream, event: Event): void {
-    this.budget.updateIncome(stream.id, { amount: parseMoney((event.target as HTMLInputElement).value) });
-    this.notice.set(`${stream.name} updated on upcoming cutoffs.`);
+  openSalary(stream: IncomeStream): void {
+    this.editing.set(blankEdit('salary', stream.id, stream.name, String(stream.amount), { payDay: String(salaryDay(String(stream.dayOfMonth))) }));
   }
 
-  updateMonths(stream: IncomeStream, event: Event): void {
-    this.budget.updateIncome(stream.id, { remainingMonths: Number((event.target as HTMLInputElement).value) });
-    this.notice.set(`${stream.name} months remaining updated.`);
+  openOther(stream: IncomeStream): void {
+    this.editing.set(
+      blankEdit('other', stream.id, stream.name, String(stream.amount), {
+        payDay: String(stream.dayOfMonth),
+        months: stream.remainingMonths == null ? null : String(stream.remainingMonths),
+        specificDate: stream.specificDate ?? (stream.isOneTime ? '' : null),
+      }),
+    );
+  }
+
+  openOwe(item: Receivable): void {
+    this.editing.set(
+      blankEdit('owe', item.id, item.name, String(item.paymentAmount), {
+        totalDebt: String(item.totalDebt),
+        terms: String(item.terms),
+        dueDay: item.dueDayOfMonth ? String(item.dueDayOfMonth) : '',
+        borrowedOn: item.borrowedOn ?? '',
+        remarks: item.notes ?? '',
+      }),
+    );
+  }
+
+  patchEdit(partial: Partial<IncomeEdit>): void {
+    const current = this.editing();
+    if (!current) return;
+    this.editing.set({ ...current, ...partial });
+  }
+
+  saveEdit(): void {
+    const form = this.editing();
+    if (!form) return;
+    const name = form.name.trim();
+    const amount = parseMoney(form.amount);
+    if (!name) {
+      this.error.set('Enter a name.');
+      return;
+    }
+    if (amount <= 0) {
+      this.error.set('Enter an amount greater than zero.');
+      return;
+    }
+    if (form.kind === 'salary') {
+      const day = salaryDay(form.payDay);
+      this.budget.updateIncome(form.id, { name, amount, dayOfMonth: day, cutoffType: salaryCutoffType(day) });
+      this.notice.set(`${name} was updated on upcoming cutoffs.`);
+    } else if (form.kind === 'owe') {
+      const total = parseMoney(form.totalDebt);
+      const terms = Number(form.terms);
+      const dueDay = Number(form.dueDay);
+      if (total <= 0) {
+        this.error.set('Enter the total they owe.');
+        return;
+      }
+      if (!Number.isFinite(terms) || terms < 1) {
+        this.error.set('Enter how many payment terms they have.');
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(form.borrowedOn)) {
+        this.error.set('Enter the date they borrowed the money.');
+        return;
+      }
+      this.budget.updateReceivable(form.id, {
+        name,
+        totalDebt: total,
+        paymentAmount: amount,
+        terms,
+        dueDayOfMonth: Number.isFinite(dueDay) && dueDay >= 1 ? dueDay : undefined,
+        borrowedOn: form.borrowedOn,
+        notes: form.remarks.trim(),
+      });
+      this.notice.set(`${name} was updated.`);
+    } else {
+      const patch: { name: string; amount: number; remainingMonths?: number; specificDate?: string; dayOfMonth?: number } = { name, amount };
+      if (form.months != null) {
+        const months = Number(form.months);
+        if (!Number.isFinite(months) || months < 0) {
+          this.error.set('Enter how many months are left.');
+          return;
+        }
+        patch.remainingMonths = months;
+      }
+      if (form.specificDate != null) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(form.specificDate)) {
+          this.error.set('Enter the date this income is received.');
+          return;
+        }
+        patch.specificDate = form.specificDate;
+        patch.dayOfMonth = Number(form.specificDate.slice(8, 10));
+      }
+      this.budget.updateIncome(form.id, patch);
+      this.notice.set(`${name} was updated.`);
+    }
+    this.error.set('');
+    this.editing.set(null);
   }
 }
 
@@ -331,4 +481,37 @@ function salaryCutoffType(day: number): CutoffType {
   if (day === 25) return '25TH_CUTOFF';
   if (day === 30) return '30TH_CUTOFF';
   return '10TH_CUTOFF';
+}
+
+interface IncomeEdit {
+  kind: 'salary' | 'other' | 'owe';
+  id: string;
+  name: string;
+  amount: string;
+  payDay: string;
+  months: string | null;
+  specificDate: string | null;
+  totalDebt: string;
+  terms: string;
+  dueDay: string;
+  borrowedOn: string;
+  remarks: string;
+}
+
+function blankEdit(kind: IncomeEdit['kind'], id: string, name: string, amount: string, extra: Partial<IncomeEdit> = {}): IncomeEdit {
+  return {
+    kind,
+    id,
+    name,
+    amount,
+    payDay: '10',
+    months: null,
+    specificDate: null,
+    totalDebt: '',
+    terms: '1',
+    dueDay: '',
+    borrowedOn: '',
+    remarks: '',
+    ...extra,
+  };
 }
