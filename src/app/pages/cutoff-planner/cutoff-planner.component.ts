@@ -190,7 +190,9 @@ import { PhpPipe } from '../../shared/php.pipe';
                   <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="categoryMeta[item.category].badgeClass">
                     {{ categoryMeta[item.category].label }}
                   </span>
-                  @if (item.isPaid) {
+                  @if (item.shareId && item.isPaid) {
+                    <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-semibold text-sky-200">Covered · not from savings</span>
+                  } @else if (item.isPaid) {
                     <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
                       Paid{{ item.paymentSource ? ' · ' + item.paymentSource : '' }}
                     </span>
@@ -521,6 +523,10 @@ export class CutoffPlannerComponent {
   }
 
   onPaidClick(cycle: PaycheckCycle, item: CutoffAllocationItem): void {
+    if (item.shareId && item.sharedExpenseId) {
+      this.budget.setSharePaid(item.sharedExpenseId, item.shareId, !item.isPaid);
+      return;
+    }
     if (item.isPaid) {
       this.budget.toggleAllocationPaid(cycle.id, item.id);
       return;

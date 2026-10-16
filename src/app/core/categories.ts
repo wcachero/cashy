@@ -77,6 +77,10 @@ export function cutoffDays(cutoff: AssignedCutoff): number[] {
   return cutoff === '10TH_CUTOFF' ? [10] : [25];
 }
 
+export function isPairCutoff(cutoff: AssignedCutoff): boolean {
+  return cutoff === 'BOTH' || cutoff === '15_30';
+}
+
 export function pairDays(pair: CutoffPair): number[] {
   return pair === '15_30' ? [15, 30] : [10, 25];
 }

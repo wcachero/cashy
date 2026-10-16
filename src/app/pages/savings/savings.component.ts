@@ -91,7 +91,7 @@ interface SavingCard {
       }
     </app-modal>
 
-    <app-modal [open]="history() !== null" size="lg" (closed)="history.set(null)">
+    <app-modal [open]="history() !== null" size="lg" align="center" (closed)="history.set(null)">
       @if (history(); as item) {
         <h2 class="text-xl font-bold">{{ historyTitle() }}</h2>
         <p class="mt-1 text-sm text-slate-400">Debit, credit, and running balance. Newest first.</p>

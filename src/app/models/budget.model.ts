@@ -73,7 +73,7 @@ export interface LiabilityItem {
   /** Balance when the plan was created or the bill was added. Used for payoff progress. */
   originalBalance?: number;
   originalTerms?: number;
-  /** Household costs that are split evenly across the 10th and 25th cutoffs. */
+  /** True when the monthly amount is split across a cutoff pair (10th & 25th, or 15th & 30th). */
   splitAcrossCutoffs?: boolean;
   isFrozenPastDue?: boolean;
 }
@@ -107,6 +107,10 @@ export interface CutoffAllocationItem {
   paymentDeducted?: number;
   /** When a bill is split across cash and banks, each slice is stored here. */
   paymentShares?: AllocationPaymentShare[];
+  /** Shared bill this row belongs to. */
+  sharedExpenseId?: string;
+  /** Person's share on a shared bill. Paid by them, not from your savings. */
+  shareId?: string;
 }
 
 export interface AllocationPaymentShare {
