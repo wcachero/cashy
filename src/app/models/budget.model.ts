@@ -10,7 +10,8 @@ export type LiabilityCategory =
 
 export type ItemStatus = 'ACTIVE' | 'PAST_DUE' | 'PAID' | 'SCHEDULED';
 
-export type AssignedCutoff = '10TH_CUTOFF' | '15TH_CUTOFF' | '25TH_CUTOFF' | '30TH_CUTOFF' | 'BOTH';
+export type AssignedCutoff = '10TH_CUTOFF' | '15TH_CUTOFF' | '25TH_CUTOFF' | '30TH_CUTOFF' | 'BOTH' | '15_30';
+export type CutoffPair = '10_25' | '15_30';
 
 export interface BalanceAdjustment {
   id: string;

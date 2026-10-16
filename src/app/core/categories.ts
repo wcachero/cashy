@@ -1,4 +1,4 @@
-import { AssignedCutoff, ItemStatus, LiabilityCategory } from '../models/budget.model';
+import { AssignedCutoff, CutoffPair, ItemStatus, LiabilityCategory } from '../models/budget.model';
 
 export interface CategoryMeta {
   label: string;
@@ -63,6 +63,7 @@ export function categoryLabel(category: LiabilityCategory | 'ALL'): string {
 
 export function cutoffLabel(cutoff: AssignedCutoff): string {
   if (cutoff === 'BOTH') return '10th & 25th';
+  if (cutoff === '15_30') return '15th & 30th';
   if (cutoff === '15TH_CUTOFF') return '15th';
   if (cutoff === '30TH_CUTOFF') return '30th';
   return cutoff === '10TH_CUTOFF' ? '10th' : '25th';
@@ -70,9 +71,18 @@ export function cutoffLabel(cutoff: AssignedCutoff): string {
 
 export function cutoffDays(cutoff: AssignedCutoff): number[] {
   if (cutoff === 'BOTH') return [10, 25];
+  if (cutoff === '15_30') return [15, 30];
   if (cutoff === '15TH_CUTOFF') return [15];
   if (cutoff === '30TH_CUTOFF') return [30];
   return cutoff === '10TH_CUTOFF' ? [10] : [25];
+}
+
+export function pairDays(pair: CutoffPair): number[] {
+  return pair === '15_30' ? [15, 30] : [10, 25];
+}
+
+export function pairLabel(pair: CutoffPair): string {
+  return pair === '15_30' ? '15th and 30th' : '10th and 25th';
 }
 
 /** Bills due on the 11th–24th are funded by the 10th salary. Everything else waits for the 25th. */

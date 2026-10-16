@@ -7,7 +7,7 @@ import {
   LucideX,
 } from '@lucide/angular';
 import { CATEGORY_FILTERS, CATEGORY_META, STATUS_META, categoryLabel, cutoffLabel, defaultCutoff } from '../../core/categories';
-import { todayIso } from '../../core/dates';
+import { formatLongDate, todayIso } from '../../core/dates';
 import { collectYears, rangeOverlapsPeriod } from '../../core/period';
 import { parseMoney, round2 } from '../../core/money';
 import { AssignedCutoff, ItemStatus, LiabilityCategory, LiabilityItem } from '../../models/budget.model';
@@ -264,6 +264,7 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
                 <option value="25TH_CUTOFF">25th cutoff</option>
                 <option value="30TH_CUTOFF">30th cutoff</option>
                 <option value="BOTH">10th and 25th</option>
+                <option value="15_30">15th and 30th</option>
               </select>
             </label>
             @if (shows(form, 'startDate')) {
@@ -292,7 +293,7 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
           @if (form.mode === 'add') {
             <label class="mt-3 flex items-center gap-2 text-sm">
               <input type="checkbox" [checked]="form.addToCycles" (change)="patch({ addToCycles: checkedValue($event) })" />
-              Add this amount to future matching cutoffs
+              Also add this amount to later matching cutoffs
             </label>
           }
           <button type="button" class="mt-4 rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950" (click)="saveEditor()">
@@ -545,8 +546,12 @@ export class DebtInventoryComponent {
     };
     const savedName = form.name.trim();
     if (form.mode === 'add') {
-      this.budget.addLiability(draft);
-      this.notice.set(`${savedName} was added.`);
+      const firstCutoff = this.budget.addLiability(draft);
+      this.notice.set(
+        firstCutoff
+          ? `${savedName} was added to the ${formatLongDate(firstCutoff)} payments cutoff.`
+          : `${savedName} was added.`,
+      );
     } else if (form.id) {
       this.budget.updateLiability(form.id, draft);
       this.notice.set(`${savedName} was updated.`);

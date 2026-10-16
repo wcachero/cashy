@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { LucideBanknote, LucideCheck, LucideChevronLeft, LucideChevronRight, LucideHandCoins, LucidePencil, LucidePlus, LucideTrash2, LucideWallet } from '@lucide/angular';
-import { formatLongDate, formatShortDate, ordinalDay, shiftMonth, todayIso } from '../../core/dates';
+import { pairDays } from '../../core/categories';
+import { formatLongDate, formatShortDate, matchesCutoffDays, ordinalDay, shiftMonth, todayIso } from '../../core/dates';
 import { formatPhp, parseMoney, round2 } from '../../core/money';
 import { collectYears, dateInPeriod } from '../../core/period';
-import { CASH_DEPOSIT_ID, CutoffType, IncomeStream, PaycheckCycle, Receivable } from '../../models/budget.model';
+import { CASH_DEPOSIT_ID, CutoffPair, CutoffType, IncomeStream, PaycheckCycle, Receivable } from '../../models/budget.model';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PhpPipe } from '../../shared/php.pipe';
 import { ModalComponent } from '../../shared/modal.component';
@@ -84,7 +85,14 @@ const PAGE_SIZE = 10;
       </label>
       @if (kind() === 'salary') {
         <label class="text-xs text-slate-400">
-          Cutoff
+          Cutoff combination
+          <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="setPair($event)">
+            <option value="10_25" [selected]="pair() === '10_25'">10th and 25th</option>
+            <option value="15_30" [selected]="pair() === '15_30'">15th and 30th</option>
+          </select>
+        </label>
+        <label class="text-xs text-slate-400">
+          This cutoff
           <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="cycleId.set(choice($event))">
             @for (group of cutoffGroups(); track group.year) {
               <optgroup [label]="group.year">
@@ -94,10 +102,6 @@ const PAGE_SIZE = 10;
               </optgroup>
             }
           </select>
-        </label>
-        <label class="text-xs text-slate-400">
-          Date received
-          <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" type="date" [value]="receivedOn()" (input)="receivedOn.set(text($event))" />
         </label>
       } @else if (kind() === 'owe') {
         <label class="text-xs text-slate-400">
@@ -122,11 +126,14 @@ const PAGE_SIZE = 10;
         </label>
       } @else {
         <label class="text-xs text-slate-400">
-          Date received
-          <input class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" type="date" [value]="receivedOn()" (input)="receivedOn.set(text($event))" />
+          Cutoff combination
+          <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="setPair($event)">
+            <option value="10_25" [selected]="pair() === '10_25'">10th and 25th</option>
+            <option value="15_30" [selected]="pair() === '15_30'">15th and 30th</option>
+          </select>
         </label>
         <label class="text-xs text-slate-400">
-          Cutoff
+          This cutoff
           <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="cycleId.set(choice($event))">
             @for (group of cutoffGroups(); track group.year) {
               <optgroup [label]="group.year">
@@ -149,7 +156,7 @@ const PAGE_SIZE = 10;
             }
           </select>
         </label>
-        <p class="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">This amount is only for the cutoff you pick. The next cutoff can be a different amount, and it is added to the linked bank, e-wallet, or cash on hand.</p>
+        <p class="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">Pick 10th and 25th or 15th and 30th, then the date. This amount is only for that cutoff and credits the linked bank, e-wallet, or cash on hand.</p>
       }
       <div class="flex items-end">
         <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950">
@@ -509,6 +516,7 @@ export class IncomeComponent {
   readonly borrowedOn = signal('');
   readonly remarks = signal('');
   readonly receivedOn = signal(todayIso());
+  readonly pair = signal<CutoffPair>('10_25');
   readonly cycleId = signal('');
   readonly month = signal('all');
   readonly year = signal('all');
@@ -533,8 +541,10 @@ export class IncomeComponent {
     const years = new Set<number>([Number(todayIso().slice(0, 4))]);
     for (const cycle of cycles) years.add(Number(cycle.cutoffDate.slice(0, 4)));
     const dates = new Set<string>([...byDate.keys(), ...standardSalaryCutoffDates([...years])]);
+    const days = pairDays(this.pair());
     return [...dates]
       .sort()
+      .filter((date) => matchesCutoffDays(date, days))
       .map((date) => {
         const cycle = byDate.get(date);
         const inflow = cycle ? this.budget.cycleInflow(cycle) : 0;
@@ -542,7 +552,7 @@ export class IncomeComponent {
           id: cycle?.id ?? date,
           date,
           year: date.slice(0, 4),
-          label: `${formatLongDate(date)} cutoff${inflow > 0 ? ` · ${formatPhp(inflow)} in` : ''}`,
+          label: `${formatLongDate(date)}${inflow > 0 ? ` · ${formatPhp(inflow)} in` : ''}`,
         };
       });
   });
@@ -661,6 +671,12 @@ export class IncomeComponent {
     return value === 'E_WALLET' || value === 'CASH' ? value : 'BANK';
   }
 
+  setPair(event: Event): void {
+    const value = this.choice(event);
+    this.pair.set(value === '15_30' ? '15_30' : '10_25');
+    this.cycleId.set('');
+  }
+
   saveDestination(event: Event): void {
     event.preventDefault();
     if (this.destKind() === 'CASH') {
@@ -709,13 +725,9 @@ export class IncomeComponent {
         this.error.set('Choose the bank, e-wallet, or cash on hand this salary is deposited to.');
         return;
       }
-      const receivedOn = this.receivedOn();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) {
-        this.error.set('Enter the date this salary was received.');
-        return;
-      }
       const cycleId = this.selectedCycleId();
-      if (!cycleId) {
+      const cutoffDate = this.cutoffOptions().find((row) => row.id === cycleId)?.date;
+      if (!cycleId || !cutoffDate) {
         this.error.set('Choose which cutoff this salary belongs to.');
         return;
       }
@@ -723,7 +735,7 @@ export class IncomeComponent {
         name,
         amount,
         kind: 'salary',
-        receivedOn,
+        receivedOn: cutoffDate,
         cycleId,
         accountId: this.accountId(),
       });
@@ -732,7 +744,7 @@ export class IncomeComponent {
         return;
       }
       this.notice.set(
-        `${name} of ${formatLongDateAmount(amount)} was added to the ${formatShortDate(saved.cutoffDate)} cutoff.${saved.credited ? this.depositNotice(receivedOn) : ' It will land in that balance on the received date.'}`,
+        `${name} of ${formatLongDateAmount(amount)} was added to the ${formatShortDate(saved.cutoffDate)} cutoff.${saved.credited ? this.depositNotice(cutoffDate) : ' It will land in that balance on the cutoff date.'}`,
       );
     } else if (this.kind() === 'owe') {
       const total = parseMoney(this.totalDebt());
@@ -761,17 +773,13 @@ export class IncomeComponent {
       });
       this.notice.set(`${name} was saved. Their payment is added to income after you log it as paid.`);
     } else {
-      const receivedOn = this.receivedOn();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) {
-        this.error.set('Enter the date this income is received.');
-        return;
-      }
       if (!this.budget.isValidDepositTarget(this.accountId())) {
         this.error.set('Choose the bank, e-wallet, or cash on hand this income was deposited to.');
         return;
       }
       const cycleId = this.selectedCycleId();
-      if (!cycleId) {
+      const cutoffDate = this.cutoffOptions().find((row) => row.id === cycleId)?.date;
+      if (!cycleId || !cutoffDate) {
         this.error.set('Choose which cutoff this income belongs to.');
         return;
       }
@@ -779,7 +787,7 @@ export class IncomeComponent {
         name,
         amount,
         kind: 'other',
-        receivedOn,
+        receivedOn: cutoffDate,
         cycleId,
         accountId: this.accountId(),
       });
@@ -788,7 +796,7 @@ export class IncomeComponent {
         return;
       }
       this.notice.set(
-        `${name} of ${formatLongDateAmount(amount)} was added to the ${formatShortDate(saved.cutoffDate)} cutoff.${saved.credited ? this.depositNotice(receivedOn) : ' It will land in that balance on the received date.'}`,
+        `${name} of ${formatLongDateAmount(amount)} was added to the ${formatShortDate(saved.cutoffDate)} cutoff.${saved.credited ? this.depositNotice(cutoffDate) : ' It will land in that balance on the cutoff date.'}`,
       );
     }
     this.error.set('');

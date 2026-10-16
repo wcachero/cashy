@@ -19,6 +19,15 @@ export function todayIso(): string {
   return toIso(today());
 }
 
+/** True when this payday matches 10/15/25/30, including Feb using the last day for the 30th. */
+export function matchesCutoffDays(iso: string, days: number[]): boolean {
+  const date = parseIsoDate(iso);
+  const actual = date.getDate();
+  if (days.includes(actual)) return true;
+  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return actual === last && days.some((day) => day > last);
+}
+
 export function formatLongDate(iso: string): string {
   return parseIsoDate(iso).toLocaleDateString('en-US', {
     month: 'short',

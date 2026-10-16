@@ -966,7 +966,7 @@ export function cloneSnapshot(snapshot: BudgetSnapshot = createSeedSnapshot()): 
  * a bill due before payday is paid for the following month.
  */
 export function dueDateForCutoff(cutoffDate: string, dueDay: number, cutoff: AssignedCutoff): string {
-  if (cutoff === 'BOTH') return cutoffDate;
+  if (cutoff === 'BOTH' || cutoff === '15_30') return cutoffDate;
   const anchor = cutoffDays(cutoff)[0];
   if (dueDay >= anchor) return shiftMonth(cutoffDate, 0, dueDay);
   return shiftMonth(cutoffDate, 1, dueDay);

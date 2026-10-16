@@ -2,7 +2,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { CATEGORY_META, cutoffDays, defaultCutoff } from '../core/categories';
-import { daysBetween, formatLongDate, formatMonthYear, formatShortDate, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
+import { daysBetween, formatLongDate, formatMonthYear, formatShortDate, matchesCutoffDays, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
 import { snapshotFromImport } from '../core/finance-export';
 import { formatPhp, round2 } from '../core/money';
 import { GIRLIE_ID, cloneSnapshot, dueDateForCutoff } from '../data/seed-data';
@@ -489,6 +489,7 @@ export class BudgetStateService {
       }
     }
     this.cashOnHand.update((cash) => round2(cash + amount));
+    this.logCash('CREDIT', amount, `Cash withdrawal · ${formatShortDate(cycle.cutoffDate)} cutoff`);
     this.withdrawals.update((list) => [...list, entry]);
   }
 
@@ -512,6 +513,7 @@ export class BudgetStateService {
     this.bankSavings.update((list) => list.map((item) => (item.id === saving.id ? next : item)));
     this.logTransaction(next, 'DEBIT', amount, entry.note ? `Cash withdrawal · ${entry.note}` : 'Cash withdrawal', date);
     this.cashOnHand.update((cash) => round2(cash + amount));
+    this.logCash('CREDIT', amount, entry.note ? `Cash withdrawal · ${entry.note}` : 'Cash withdrawal', date);
     this.withdrawals.update((list) => [...list, entry]);
     return true;
   }
@@ -522,7 +524,10 @@ export class BudgetStateService {
     if (!entry) return;
     if (entry.savingsId) this.refundToSavings(entry.savingsId, entry.amount, 'Withdrawal removed');
     if (entry.accountSavingsId) this.refundToSavings(entry.accountSavingsId, entry.accountDeducted ?? 0, 'Withdrawal removed');
-    if (entry.addedToCash) this.cashOnHand.update((cash) => round2(Math.max(0, cash - entry.amount)));
+    if (entry.addedToCash) {
+      this.cashOnHand.update((cash) => round2(Math.max(0, cash - entry.amount)));
+      this.logCash('DEBIT', entry.amount, 'Withdrawal removed');
+    }
     this.withdrawals.update((list) => list.filter((item) => item.id !== id));
   }
 
@@ -728,7 +733,10 @@ export class BudgetStateService {
     for (const share of shares) {
       if (!share.deducted) continue;
       if (share.method === 'BANK') this.refundToSavings(share.savingsId, share.deducted, `Unmarked ${allocation.name}`);
-      else if (share.method === 'CASH') this.cashOnHand.update((cash) => round2(cash + share.deducted));
+      else if (share.method === 'CASH') {
+        this.cashOnHand.update((cash) => round2(cash + share.deducted));
+        this.logCash('CREDIT', share.deducted, `Unmarked ${allocation.name}`);
+      }
     }
     allocation.paymentMethod = undefined;
     allocation.paymentAccountId = undefined;
@@ -753,7 +761,10 @@ export class BudgetStateService {
     const refund = round2(Math.min(-delta, allocation.paymentDeducted ?? 0));
     if (refund <= 0) return;
     if (allocation.paymentMethod === 'BANK') this.refundToSavings(allocation.paymentSavingsId, refund, `Paid less on ${allocation.name}`);
-    else this.cashOnHand.update((cash) => round2(cash + refund));
+    else {
+      this.cashOnHand.update((cash) => round2(cash + refund));
+      this.logCash('CREDIT', refund, `Paid less on ${allocation.name}`);
+    }
     allocation.paymentDeducted = round2((allocation.paymentDeducted ?? 0) - refund);
   }
 
@@ -784,7 +795,7 @@ export class BudgetStateService {
     this.liabilities.set(liabilities);
   }
 
-  addLiability(draft: LiabilityDraft): void {
+  addLiability(draft: LiabilityDraft): string | undefined {
     const assignedCutoff = draft.assignedCutoff ?? defaultCutoff(draft.dueDayOfMonth);
     const item: LiabilityItem = {
       id: crypto.randomUUID(),
@@ -809,9 +820,11 @@ export class BudgetStateService {
       splitAcrossCutoffs: draft.splitAcrossCutoffs,
     };
     this.liabilities.update((list) => [...list, item]);
-    if (draft.addToFutureCutoffs !== false && item.monthlyAmortization > 0) {
-      this.scheduleLiability(item);
+    const planned = item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance;
+    if (planned > 0) {
+      return this.scheduleLiability(item, draft.addToFutureCutoffs !== false);
     }
+    return undefined;
   }
 
   updateLiability(id: string, patch: Partial<LiabilityDraft>): void {
@@ -1259,7 +1272,16 @@ export class BudgetStateService {
   enableCashOnHand(opening = 0): void {
     this.cashEnabled.set(true);
     const extra = round2(Math.max(0, opening));
-    if (extra > 0) this.cashOnHand.update((cash) => round2(cash + extra));
+    if (extra > 0) this.addCashOnHand(extra, 'Cash on hand opening');
+  }
+
+  /** Adds cash and writes a credit to history. */
+  addCashOnHand(amount: number, description = 'Cash added'): void {
+    const extra = round2(Math.max(0, amount));
+    if (extra <= 0) return;
+    this.cashEnabled.set(true);
+    this.cashOnHand.update((cash) => round2(cash + extra));
+    this.logCash('CREDIT', extra, description);
   }
 
   /** Savings rows that belong to a registered bank or e-wallet. */
@@ -1452,6 +1474,21 @@ export class BudgetStateService {
     this.transactions.update((list) => [...list, entry]);
   }
 
+  private logCash(type: AccountTransaction['type'], amount: number, description: string, date = todayIso()): void {
+    if (amount <= 0) return;
+    const entry: AccountTransaction = {
+      id: crypto.randomUUID(),
+      savingsId: CASH_DEPOSIT_ID,
+      accountId: CASH_DEPOSIT_ID,
+      date,
+      type,
+      amount: round2(amount),
+      balanceAfter: this.cashOnHand(),
+      description,
+    };
+    this.transactions.update((list) => [...list, entry]);
+  }
+
   /** History for one savings row, newest first. */
   transactionsFor(savingsId: string): AccountTransaction[] {
     return this.transactions()
@@ -1490,6 +1527,7 @@ export class BudgetStateService {
     if (amount <= 0) return;
     if (accountId === CASH_DEPOSIT_ID) {
       this.cashOnHand.update((cash) => round2(cash + amount));
+      this.logCash('CREDIT', amount, description);
       return;
     }
     this.creditAccount(accountId, amount, description);
@@ -1511,7 +1549,10 @@ export class BudgetStateService {
 
   private deductFromCash(amount: number): number {
     const deducted = round2(Math.min(Math.max(0, amount), this.cashOnHand()));
-    if (deducted > 0) this.cashOnHand.update((cash) => round2(cash - deducted));
+    if (deducted > 0) {
+      this.cashOnHand.update((cash) => round2(cash - deducted));
+      this.logCash('DEBIT', deducted, 'Cash spent');
+    }
     return deducted;
   }
 
@@ -2029,38 +2070,53 @@ export class BudgetStateService {
     }
   }
 
-  private scheduleLiability(item: LiabilityItem): void {
-    const occurrences = item.remainingTerms && item.remainingTerms > 0 ? item.remainingTerms : item.category === 'LIVING_EXPENSE' ? 24 : 1;
+  private scheduleLiability(item: LiabilityItem, allMatching = true): string | undefined {
+    const amount = round2(item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance);
+    if (amount <= 0) return undefined;
+    const pair = cutoffDays(item.assignedCutoff);
+    const split = item.assignedCutoff === 'BOTH' || item.assignedCutoff === '15_30';
+    const planned = split && item.category === 'LIVING_EXPENSE' ? round2(amount / 2) : amount;
+    const occurrences =
+      item.remainingTerms && item.remainingTerms > 0
+        ? item.remainingTerms
+        : item.category === 'ONE_TIME_OLA'
+          ? 1
+          : allMatching
+            ? 24
+            : 1;
+    this.ensureCurrentMonthCutoffs();
     this.ensureAssignedCycles(item);
     let added = 0;
+    let firstCutoff: string | undefined;
     this.paycheckCycles.update((cycles) => {
       const next = structuredClone(cycles).sort((a, b) => a.cutoffDate.localeCompare(b.cutoffDate));
       for (const cycle of next) {
         if (added >= occurrences) break;
-        const matches = cutoffDays(item.assignedCutoff).some((day) => cycleMatchesSalaryDay(cycle.cutoffDate, day));
-        if (!matches) continue;
+        if (!matchesCutoffDays(cycle.cutoffDate, pair)) continue;
+        if (cycle.cutoffDate < item.startDate) continue;
+        if (item.endDate && cycle.cutoffDate > item.endDate) continue;
+        if (cycle.allocations.some((allocation) => allocation.liabilityId === item.id)) continue;
         const dueDate = dueDateForCutoff(cycle.cutoffDate, item.dueDayOfMonth, item.assignedCutoff);
-        if (dueDate < item.startDate) continue;
-        if (item.endDate && dueDate > item.endDate) continue;
-        if (cycle.allocations.some((allocation) => allocation.liabilityId === item.id && allocation.dueDate === dueDate)) continue;
         const allocation: CutoffAllocationItem = {
           id: `${cycle.id}:${item.id}`,
           liabilityId: item.id,
           name: item.name,
           category: item.category,
           dueDate,
-          plannedAmount: item.monthlyAmortization,
+          plannedAmount: planned,
           actualPaidAmount: 0,
           minimumDue: item.minimumDue,
           isPaid: false,
           countsAsTerm: item.remainingTerms != null,
-          paymentNote: 'Added from the debt inventory',
+          paymentNote: 'Added from Debts / Expenses',
         };
         cycle.allocations.push(allocation);
         added += 1;
+        firstCutoff ??= cycle.cutoffDate;
       }
       return next;
     });
+    return firstCutoff;
   }
 
   private applyPayment(allocation: CutoffAllocationItem, liabilities: LiabilityItem[], amount: number): void {
@@ -2237,11 +2293,7 @@ function isSalaryCutoff(type: string): boolean {
 }
 
 function cycleMatchesSalaryDay(iso: string, day: number): boolean {
-  const date = parseIsoDate(iso);
-  const actual = date.getDate();
-  if (actual === day) return true;
-  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  return day > last && actual === last;
+  return matchesCutoffDays(iso, [day]);
 }
 
 function nextDayOnOrAfter(anchor: string, day: number): string {
@@ -2251,6 +2303,7 @@ function nextDayOnOrAfter(anchor: string, day: number): string {
 
 function salaryCutoffDates(day: number, cycles: PaycheckCycle[], today: string): string[] {
   const start = parseIsoDate(today);
+  const monthStart = `${today.slice(0, 7)}-01`;
   const last = cycles.reduce((max, cycle) => (cycle.cutoffDate > max ? cycle.cutoffDate : max), '');
   const lastMonth = last ? parseIsoDate(last) : start;
   const end = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1);
@@ -2260,7 +2313,7 @@ function salaryCutoffDates(day: number, cycles: PaycheckCycle[], today: string):
   let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   while (cursor <= endMonth) {
     const iso = shiftMonth(toIso(cursor), 0, day);
-    if (iso >= today) dates.push(iso);
+    if (iso >= monthStart) dates.push(iso);
     cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
   }
   return dates;

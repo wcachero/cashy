@@ -166,6 +166,26 @@ html[data-theme='light'] textarea {
   color: #0f172a;
 }
 
+.atm-card {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #dbe3ee;
+}
+
+.atm-card .atm-muted {
+  color: #64748b;
+}
+
+html[data-theme='light'] .atm-card,
+html[data-theme='light'] .atm-card .text-slate-900,
+html[data-theme='light'] .atm-card p {
+  color: #0f172a;
+}
+
+html[data-theme='light'] .atm-card .atm-muted {
+  color: #64748b;
+}
+
 .nav-tab-active {
   background-color: #34d399;
   color: #022c22;

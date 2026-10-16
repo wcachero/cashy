@@ -24,21 +24,20 @@ import { PhpPipe } from '../../shared/php.pipe';
       </p>
     </section>
 
-    <div class="mt-5 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Paycheck cycles">
-      @for (cycle of budget.paycheckCycles(); track cycle.id) {
-        <button
-          type="button"
-          role="tab"
-          class="shrink-0 rounded-full border px-3 py-2 text-left text-sm transition"
-          [ngClass]="selected().id === cycle.id ? 'border-emerald-300 bg-emerald-400 text-slate-950' : 'border-white/10 bg-white/5'"
-          [attr.aria-selected]="selected().id === cycle.id"
-          (click)="selectedId.set(cycle.id)"
-        >
-          <span class="block font-semibold">{{ longDate(cycle.cutoffDate) }}</span>
-          <span class="block text-[11px] opacity-70">{{ paidCount(cycle) }}/{{ cycle.allocations.length }} paid</span>
-        </button>
-      }
-    </div>
+    <label class="mt-5 block max-w-md text-xs text-slate-400">
+      Cutoff
+      <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="selectedId.set(choice($event))">
+        @for (group of cutoffGroups(); track group.year) {
+          <optgroup [label]="group.year">
+            @for (cycle of group.rows; track cycle.id) {
+              <option [value]="cycle.id" [selected]="selected().id === cycle.id">
+                {{ longDate(cycle.cutoffDate) }} · {{ paidCount(cycle) }}/{{ cycle.allocations.length }} paid
+              </option>
+            }
+          </optgroup>
+        }
+      </select>
+    </label>
 
     @if (budget.paycheckCycles().length === 0) {
       <p class="mt-4 rounded-3xl border border-white/10 bg-slate-900/70 px-4 py-5 text-sm text-slate-400">
@@ -347,7 +346,23 @@ export class CutoffPlannerComponent {
       if (match) return match;
     }
     const today = this.today;
-    return [...cycles].reverse().find((cycle) => cycle.cutoffDate <= today) ?? this.budget.upcomingCycle() ?? cycles[0];
+    return (
+      cycles.find((cycle) => cycle.cutoffDate >= today) ??
+      [...cycles].reverse().find((cycle) => cycle.cutoffDate <= today) ??
+      this.budget.upcomingCycle() ??
+      cycles[0]
+    );
+  });
+
+  readonly cutoffGroups = computed(() => {
+    const groups: { year: string; rows: PaycheckCycle[] }[] = [];
+    for (const cycle of this.budget.paycheckCycles()) {
+      const year = cycle.cutoffDate.slice(0, 4);
+      const current = groups.find((group) => group.year === year);
+      if (current) current.rows.push(cycle);
+      else groups.push({ year, rows: [cycle] });
+    }
+    return groups;
   });
 
   readonly nextCycle = computed(() => {
