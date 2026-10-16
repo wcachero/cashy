@@ -94,6 +94,10 @@ export function asCutoffPair(value: unknown): CutoffPair {
   return value === '15_30' ? '15_30' : '10_25';
 }
 
+export function pairFromCutoff(cutoff: AssignedCutoff): CutoffPair {
+  return cutoff === '15_30' || cutoff === '15TH_CUTOFF' || cutoff === '30TH_CUTOFF' ? '15_30' : '10_25';
+}
+
 /** Which payday in the pair funds a due day. */
 export function cutoffFromDueDay(dueDayOfMonth: number, pair: CutoffPair = '10_25'): AssignedCutoff {
   const day = Math.min(31, Math.max(1, Math.round(dueDayOfMonth)));

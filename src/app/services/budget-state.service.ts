@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { CATEGORY_META, asCutoffPair, cutoffDays, defaultCutoff, isPairCutoff } from '../core/categories';
+import { CATEGORY_META, asCutoffPair, cutoffDays, defaultCutoff, fundingCutoffDate, isPairCutoff, pairDays } from '../core/categories';
 import { daysBetween, formatLongDate, formatMonthYear, formatShortDate, matchesCutoffDays, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
 import { snapshotFromImport } from '../core/finance-export';
 import { formatPhp, round2 } from '../core/money';
@@ -71,6 +71,8 @@ export interface LiabilityDraft {
   notes?: string;
   splitAcrossCutoffs?: boolean;
   addToFutureCutoffs?: boolean;
+  sharedPeople?: { name: string; amount: number }[];
+  sharedExpenseDate?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -456,6 +458,22 @@ export class BudgetStateService {
     );
   }
 
+  /** Full bill total on this cutoff, counting a shared expense once at its target amount. */
+  cycleBillTotal(cycle: PaycheckCycle): number {
+    const seen = new Set<string>();
+    return round2(
+      cycle.allocations.reduce((sum, item) => {
+        if (item.sharedExpenseId) {
+          if (seen.has(item.sharedExpenseId)) return sum;
+          seen.add(item.sharedExpenseId);
+          const expense = this.sharedExpenses().find((row) => row.id === item.sharedExpenseId);
+          return sum + (expense?.totalAmount ?? item.plannedAmount);
+        }
+        return sum + item.plannedAmount;
+      }, 0),
+    );
+  }
+
   cyclePaid(cycle: PaycheckCycle): number {
     return round2(cycle.allocations.filter((item) => item.isPaid).reduce((sum, item) => sum + item.actualPaidAmount, 0));
   }
@@ -465,7 +483,23 @@ export class BudgetStateService {
   }
 
   withdrawnFor(cycleId: string): number {
-    return round2(this.withdrawals().filter((item) => item.cycleId === cycleId).reduce((sum, item) => sum + item.amount, 0));
+    const cycle = this.paycheckCycles().find((item) => item.id === cycleId);
+    const accountId = cycle ? this.payAccountFor(cycle) : undefined;
+    const nextDate = cycle ? this.nextPairCutoffDate(cycle) : undefined;
+    const savingsIds = new Set(
+      accountId ? this.savingsForAccount(accountId).map((item) => item.id) : [],
+    );
+    return round2(
+      this.withdrawals()
+        .filter((item) => {
+          if (item.cycleId === cycleId) return true;
+          if (item.cycleId || !cycle || !item.savingsId || !savingsIds.has(item.savingsId)) return false;
+          if (item.withdrawnOn < cycle.cutoffDate) return false;
+          if (nextDate && item.withdrawnOn >= nextDate) return false;
+          return true;
+        })
+        .reduce((sum, item) => sum + item.amount, 0),
+    );
   }
 
   remainingCash(cycle: PaycheckCycle): number {
@@ -508,8 +542,10 @@ export class BudgetStateService {
     const amount = round2(Math.min(Math.max(0, draft.amount), Math.max(0, saving.amount)));
     if (amount <= 0) return false;
     const date = draft.withdrawnOn && /^\d{4}-\d{2}-\d{2}$/.test(draft.withdrawnOn) ? draft.withdrawnOn : todayIso();
+    const cycleId = saving.accountId ? this.arrivedCycleForAccount(saving.accountId)?.id : undefined;
     const entry: CutoffWithdrawal = {
       id: crypto.randomUUID(),
+      cycleId,
       savingsId: saving.id,
       sourceName: `${saving.bankName} · ${saving.accountName}`,
       amount,
@@ -812,7 +848,7 @@ export class BudgetStateService {
     this.liabilities.set(liabilities);
   }
 
-  addLiability(draft: LiabilityDraft): string | undefined {
+  addLiability(draft: LiabilityDraft): { id: string; cutoff?: string } {
     const assignedCutoff = draft.assignedCutoff ?? defaultCutoff(draft.dueDayOfMonth, this.cutoffPair());
     const item: LiabilityItem = {
       id: crypto.randomUUID(),
@@ -838,10 +874,12 @@ export class BudgetStateService {
     };
     this.liabilities.update((list) => [...list, item]);
     const planned = item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance;
-    if (planned > 0) {
-      return this.scheduleLiability(item, draft.addToFutureCutoffs !== false);
+    const shared = Boolean(draft.sharedPeople?.length);
+    const cutoff = planned > 0 ? this.scheduleLiability(item, shared ? false : draft.addToFutureCutoffs !== false) : undefined;
+    if (draft.sharedPeople) {
+      this.attachSharedToLiability(item.id, draft.sharedPeople, draft.sharedExpenseDate || cutoff);
     }
-    return undefined;
+    return { id: item.id, cutoff };
   }
 
   updateLiability(id: string, patch: Partial<LiabilityDraft>): void {
@@ -880,6 +918,146 @@ export class BudgetStateService {
         };
       }),
     );
+    const saved = this.liabilities().find((item) => item.id === id);
+    if (saved) this.resyncLiabilityAllocations(saved, patch);
+  }
+
+  nextUnpaidDue(liabilityId: string): string | undefined {
+    const rows = this.paycheckCycles()
+      .flatMap((cycle) => cycle.allocations.map((item) => ({ dueDate: item.dueDate, item, cycleDate: cycle.cutoffDate })))
+      .filter((row) => row.item.liabilityId === liabilityId && !row.item.shareId && !row.item.isPaid)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.cycleDate.localeCompare(b.cycleDate));
+    return rows[0]?.dueDate;
+  }
+
+  sharedExpenseForLiability(liabilityId: string): SharedExpense | undefined {
+    return this.sharedExpenses().find((item) => item.liabilityId === liabilityId);
+  }
+
+  private resyncLiabilityAllocations(item: LiabilityItem, patch: Partial<LiabilityDraft>): void {
+    const amount = round2(item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance);
+    const days = cutoffDays(item.assignedCutoff);
+    const split = days.length > 1;
+    const parts = split ? days.length : 1;
+    const share = round2(amount / parts);
+    const lastShare = round2(amount - share * (parts - 1));
+    const lastDay = days[days.length - 1];
+    const people = patch.sharedPeople;
+    let shared = this.sharedExpenses().find((row) => row.liabilityId === item.id);
+
+    this.paycheckCycles.update((cycles) =>
+      cycles.map((cycle) => {
+        const matches =
+          matchesCutoffDays(cycle.cutoffDate, days) &&
+          cycle.cutoffDate >= item.startDate &&
+          (!item.endDate || cycle.cutoffDate <= item.endDate);
+        return {
+          ...cycle,
+          allocations: cycle.allocations
+            .map((allocation) => {
+              if (allocation.liabilityId !== item.id || allocation.shareId || allocation.isPaid) return allocation;
+              if (!matches) return allocation;
+              const isLast = matchesCutoffDays(cycle.cutoffDate, [lastDay]);
+              return {
+                ...allocation,
+                name: item.name,
+                category: item.category,
+                dueDate: split ? cycle.cutoffDate : dueDateForCutoff(cycle.cutoffDate, item.dueDayOfMonth, item.assignedCutoff),
+                plannedAmount: split ? (isLast ? lastShare : share) : amount,
+                minimumDue: item.minimumDue && split ? round2(item.minimumDue / parts) : item.minimumDue,
+              };
+            })
+            .filter((allocation) => {
+              if (allocation.liabilityId !== item.id) return true;
+              if (allocation.isPaid) return true;
+              if (allocation.shareId) return Boolean(shared) || Boolean(people?.length);
+              return matches;
+            }),
+        };
+      }),
+    );
+
+    if (amount > 0 && item.status !== 'PAID' && !shared && !people?.length) {
+      this.scheduleLiability(item, patch.addToFutureCutoffs !== false);
+    }
+
+    if (people) {
+      if (!shared) {
+        this.attachSharedToLiability(item.id, people, patch.sharedExpenseDate);
+        return;
+      }
+      this.sharedExpenses.update((list) =>
+        list.map((row) =>
+          row.id === shared!.id
+            ? { ...row, name: item.name, totalAmount: amount, expenseDate: patch.sharedExpenseDate || row.expenseDate }
+            : row,
+        ),
+      );
+      this.syncSharedPeople(shared.id, people);
+      shared = this.sharedExpenses().find((row) => row.id === shared!.id);
+      if (shared) this.upsertSharedBill(shared);
+      return;
+    }
+
+    if (!shared) return;
+    const date = patch.sharedExpenseDate || this.nextUnpaidDue(item.id) || item.startDate;
+    this.sharedExpenses.update((list) =>
+      list.map((row) => (row.id === shared!.id ? { ...row, name: item.name, totalAmount: amount, expenseDate: date } : row)),
+    );
+    const saved = this.sharedExpenses().find((row) => row.id === shared.id);
+    if (saved) this.upsertSharedBill(saved);
+  }
+
+  attachSharedToLiability(
+    liabilityId: string,
+    people: { name: string; amount: number }[],
+    expenseDate?: string,
+  ): void {
+    const item = this.liabilities().find((row) => row.id === liabilityId);
+    if (!item) return;
+    const date = expenseDate || this.nextUnpaidDue(item.id) || item.startDate;
+    const total = item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance;
+    let expense = this.sharedExpenses().find((row) => row.liabilityId === liabilityId);
+    if (!expense) {
+      expense = {
+        id: crypto.randomUUID(),
+        name: item.name,
+        totalAmount: total,
+        expenseDate: date,
+        liabilityId: item.id,
+        shares: [],
+      };
+      this.sharedExpenses.update((list) => [...list, expense!]);
+    }
+    for (const person of people) {
+      if (person.name.trim() && person.amount > 0) this.addShare(expense.id, person.name, person.amount);
+    }
+    const saved = this.sharedExpenses().find((row) => row.id === expense!.id);
+    if (saved) this.upsertSharedBill(saved);
+  }
+
+  private syncSharedPeople(expenseId: string, people: { name: string; amount: number }[]): void {
+    const expense = this.sharedExpenses().find((row) => row.id === expenseId);
+    if (!expense) return;
+    const wanted = people.filter((person) => person.name.trim() && person.amount > 0);
+    const names = new Set(wanted.map((person) => person.name.trim().toLowerCase()));
+    for (const person of wanted) {
+      const existing = expense.shares.find((share) => share.name.trim().toLowerCase() === person.name.trim().toLowerCase());
+      if (!existing) {
+        this.addShare(expenseId, person.name, person.amount);
+        continue;
+      }
+      if (existing.paid || round2(existing.amount) === round2(person.amount)) continue;
+      this.patchShare(expenseId, existing.id, { amount: round2(person.amount) });
+      this.receivables.update((list) =>
+        list.map((row) => (row.id === existing.receivableId ? { ...row, totalDebt: round2(person.amount), paymentAmount: round2(person.amount) } : row)),
+      );
+    }
+    const saved = this.sharedExpenses().find((row) => row.id === expenseId);
+    for (const share of saved?.shares ?? []) {
+      if (share.paid || names.has(share.name.trim().toLowerCase())) continue;
+      this.removeShare(expenseId, share.id);
+    }
   }
 
   deleteLiability(id: string): void {
@@ -1484,6 +1662,22 @@ export class BudgetStateService {
     return this.payAccountFor(cycle);
   }
 
+  /** Latest arrived cutoff whose salary lands in this bank or e-wallet. */
+  private arrivedCycleForAccount(accountId: string): PaycheckCycle | undefined {
+    const today = todayIso();
+    return this.paycheckCycles()
+      .filter((cycle) => cycle.cutoffDate <= today && this.payAccountFor(cycle) === accountId)
+      .sort((a, b) => b.cutoffDate.localeCompare(a.cutoffDate))[0];
+  }
+
+  private nextPairCutoffDate(cycle: PaycheckCycle): string | undefined {
+    const days = pairDays(this.cutoffPair());
+    return this.paycheckCycles()
+      .map((item) => item.cutoffDate)
+      .filter((date) => date > cycle.cutoffDate && matchesCutoffDays(date, days))
+      .sort()[0];
+  }
+
   /** Appends a debit or credit to a savings row's history. */
   private logTransaction(row: BankSaving, type: AccountTransaction['type'], amount: number, description: string, date = todayIso()): void {
     if (amount <= 0) return;
@@ -2036,13 +2230,9 @@ export class BudgetStateService {
             ? {
                 ...item,
                 name: expense.name,
-                bankName: expense.name,
-                monthlyAmortization: yours,
-                dueDayOfMonth: dueDay,
-                assignedCutoff: defaultCutoff(dueDay, this.cutoffPair()),
-                startDate: expense.expenseDate,
-                endDate: expense.expenseDate,
                 notes,
+                dueDayOfMonth: dueDay,
+                monthlyAmortization: item.category === 'LIVING_EXPENSE' ? yours : item.monthlyAmortization,
               }
             : item,
         ),
@@ -2052,31 +2242,35 @@ export class BudgetStateService {
   }
 
   private placeSharedAllocation(liabilityId: string, expense: SharedExpense, yours: number): void {
-    const cutoff = this.cutoffOnOrAfter(expense.expenseDate);
+    const existing = this.paycheckCycles().find((cycle) =>
+      cycle.allocations.some((allocation) => allocation.liabilityId === liabilityId && !allocation.shareId),
+    );
+    const cutoff = existing?.cutoffDate ?? fundingCutoffDate(expense.expenseDate, this.cutoffPair()).cutoffDate;
     this.ensureCycle(cutoff);
+    const liability = this.liabilities().find((item) => item.id === liabilityId);
     this.paycheckCycles.update((cycles) =>
       cycles.map((cycle) => {
         const isTarget = cycle.cutoffDate === cutoff;
         const keptYours = cycle.allocations.find((allocation) => allocation.liabilityId === liabilityId && !allocation.shareId && allocation.isPaid);
         const next = cycle.allocations.filter((allocation) => {
-          if (allocation.sharedExpenseId === expense.id) return false;
           if (allocation.shareId && expense.shares.some((share) => share.id === allocation.shareId)) return false;
-          if (allocation.liabilityId === liabilityId && !allocation.shareId) return false;
+          if (allocation.sharedExpenseId === expense.id && allocation.shareId) return false;
+          if (isTarget && allocation.liabilityId === liabilityId && !allocation.shareId && !allocation.isPaid) return false;
           return true;
         });
         if (!isTarget) {
-          if (keptYours) next.push(keptYours);
+          if (keptYours && !next.some((allocation) => allocation.id === keptYours.id)) next.push(keptYours);
           return { ...cycle, allocations: next };
         }
         if (keptYours) {
-          next.push({ ...keptYours, sharedExpenseId: expense.id });
+          next.push({ ...keptYours, sharedExpenseId: expense.id, name: expense.name });
         } else if (yours > 0) {
           next.push({
             id: `${cycle.id}:${liabilityId}`,
             liabilityId,
             sharedExpenseId: expense.id,
             name: expense.name,
-            category: 'LIVING_EXPENSE',
+            category: liability?.category ?? 'LIVING_EXPENSE',
             dueDate: expense.expenseDate,
             plannedAmount: yours,
             actualPaidAmount: 0,
@@ -2092,14 +2286,14 @@ export class BudgetStateService {
             sharedExpenseId: expense.id,
             shareId: share.id,
             name: `${expense.name} · ${share.name}`,
-            category: 'LIVING_EXPENSE',
+            category: liability?.category ?? 'LIVING_EXPENSE',
             dueDate: expense.expenseDate,
             plannedAmount: share.amount,
-            actualPaidAmount: 0,
+            actualPaidAmount: share.paid ? share.amount : 0,
             isPaid: share.paid,
             countsAsTerm: false,
             paymentNote: share.paid
-              ? `Covered by ${share.name} · not added to savings`
+              ? `Covered by ${share.name}${share.paidOn ? ` on ${formatLongDate(share.paidOn)}` : ''} · not added to savings`
               : `${share.name}'s share · waiting for them to pay`,
             paymentSource: share.paid ? share.name : undefined,
           });

@@ -2,11 +2,11 @@ import { NgClass } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { LucideCheck, LucidePiggyBank, LucidePlus, LucideTrash2 } from '@lucide/angular';
+import { LucideCheck, LucidePiggyBank, LucidePlus, LucideTrash2, LucideUsers } from '@lucide/angular';
 import { CATEGORY_META, pairDays, pairLabel } from '../../core/categories';
 import { formatLongDate, formatShortDate, matchesCutoffDays, todayIso } from '../../core/dates';
 import { parseMoney, round2 } from '../../core/money';
-import { CutoffAllocationItem, PaycheckCycle } from '../../models/budget.model';
+import { CutoffAllocationItem, PaycheckCycle, SharedExpense, SharedExpenseShare } from '../../models/budget.model';
 import { BudgetStateService, CutoffIncomeLine } from '../../services/budget-state.service';
 import { ModalComponent } from '../../shared/modal.component';
 import { PhpPipe } from '../../shared/php.pipe';
@@ -14,7 +14,7 @@ import { PhpPipe } from '../../shared/php.pipe';
 @Component({
   selector: 'app-cutoff-planner',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, RouterLink, PhpPipe, ModalComponent, LucideCheck, LucidePiggyBank, LucidePlus, LucideTrash2],
+  imports: [NgClass, RouterLink, PhpPipe, ModalComponent, LucideCheck, LucidePiggyBank, LucidePlus, LucideTrash2, LucideUsers],
   template: `
     <section>
       <p class="text-sm text-slate-400">Salary cutoff payments</p>
@@ -24,14 +24,7 @@ import { PhpPipe } from '../../shared/php.pipe';
       </p>
     </section>
 
-    <div class="mt-5 grid max-w-md gap-3">
-      <label class="block text-xs text-slate-400">
-        Cutoff combination
-        <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="setPair($event)">
-          <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
-          <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
-        </select>
-      </label>
+    <div class="mt-5 max-w-md">
       <label class="block text-xs text-slate-400">
         {{ pairName() }} cutoff
         <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="selectedId.set(choice($event))">
@@ -46,11 +39,12 @@ import { PhpPipe } from '../../shared/php.pipe';
           }
         </select>
       </label>
+      <p class="mt-1 text-xs text-slate-500">Dates follow the {{ pairName() }} combination set on Income.</p>
     </div>
 
     @if (pairCycles().length === 0) {
       <p class="mt-4 rounded-3xl border border-white/10 bg-slate-900/70 px-4 py-5 text-sm text-slate-400">
-        No {{ pairName() }} cutoffs yet. Pick this combination on Income, then add salary for those dates.
+        No {{ pairName() }} cutoffs yet. Set this combination on Income, then add salary for those dates.
       </p>
     }
 
@@ -82,6 +76,9 @@ import { PhpPipe } from '../../shared/php.pipe';
                 <p class="text-[11px] text-slate-400">
                   @if (budget.accountLabel(line.accountId); as label) {
                     {{ label }}
+                    @if (line.accountId) {
+                      · actual {{ budget.accountBalance(line.accountId) | php }}
+                    }
                   } @else {
                     Not linked yet
                   }
@@ -93,9 +90,23 @@ import { PhpPipe } from '../../shared/php.pipe';
             </div>
           }
           <div class="rounded-2xl bg-white/5 px-3 py-2">
+            <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">Total bills</p>
+            <p class="font-mono text-sm">{{ budget.cycleBillTotal(cycle) | php }}</p>
+          </div>
+          <div class="rounded-2xl bg-white/5 px-3 py-2">
             <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">− Planned</p>
             <p class="font-mono text-sm">{{ budget.cyclePlanned(cycle) | php }}</p>
           </div>
+          <div class="rounded-2xl bg-white/5 px-3 py-2">
+            <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">Actual paid</p>
+            <p class="font-mono text-sm">{{ budget.cyclePaid(cycle) | php }}</p>
+          </div>
+          @if (depositAccountId(cycle); as accountId) {
+            <div class="rounded-2xl bg-sky-400/10 px-3 py-2">
+              <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">Actual in {{ budget.accountLabel(accountId) }}</p>
+              <p class="font-mono text-sm">{{ budget.accountBalance(accountId) | php }}</p>
+            </div>
+          }
           <div class="rounded-2xl bg-white/5 px-3 py-2">
             <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">− Reserve</p>
             <p class="font-mono text-sm">{{ cycle.sinkingFundReserved | php }}</p>
@@ -125,7 +136,7 @@ import { PhpPipe } from '../../shared/php.pipe';
               {{ budget.cycleRemaining(cycle) | php }}
             </p>
           </div>
-          <p class="text-xs text-slate-500 sm:col-span-4">Each bill you tick paid comes off this remaining amount, and off the bank or cash you paid it from.</p>
+          <p class="text-xs text-slate-500 sm:col-span-4">Bills you mark paid and cash you withdraw from this cutoff or its salary bank both come off remaining and off that account's actual balance.</p>
         </div>
       </section>
 
@@ -178,65 +189,138 @@ import { PhpPipe } from '../../shared/php.pipe';
       </section>
 
       <ul class="mt-4 space-y-3">
-        @for (item of cycle.allocations; track item.id) {
-          <li class="rounded-3xl border border-white/10 bg-slate-900/70 p-4" [class.opacity-70]="item.isPaid">
-            <div class="flex items-start gap-3">
-              <button
-                type="button"
-                class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border"
-                [ngClass]="item.isPaid ? 'border-emerald-300 bg-emerald-300 text-slate-950' : 'border-white/20'"
-                [attr.aria-pressed]="item.isPaid"
-                [attr.aria-label]="(item.isPaid ? 'Mark unpaid: ' : 'Mark paid: ') + item.name"
-                (click)="onPaidClick(cycle, item)"
-              >
-                @if (item.isPaid) {
-                  <svg lucideCheck [size]="16"></svg>
-                }
-              </button>
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="font-semibold">{{ item.name }}</h3>
-                  <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="categoryMeta[item.category].badgeClass">
-                    {{ categoryMeta[item.category].label }}
-                  </span>
-                  @if (item.shareId && item.isPaid) {
-                    <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-semibold text-sky-200">Covered · not from savings</span>
-                  } @else if (item.isPaid) {
-                    <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
-                      Paid{{ item.paymentSource ? ' · ' + item.paymentSource : '' }}
-                    </span>
+        @for (tile of paymentTiles(cycle); track tile.id) {
+          @if (tile.kind === 'bill') {
+            <li class="rounded-3xl border border-white/10 bg-slate-900/70 p-4" [class.opacity-70]="tile.item.isPaid">
+              <div class="flex items-start gap-3">
+                <button
+                  type="button"
+                  class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border"
+                  [ngClass]="tile.item.isPaid ? 'border-emerald-300 bg-emerald-300 text-slate-950' : 'border-white/20'"
+                  [attr.aria-pressed]="tile.item.isPaid"
+                  [attr.aria-label]="(tile.item.isPaid ? 'Mark unpaid: ' : 'Mark paid: ') + tile.item.name"
+                  (click)="onPaidClick(cycle, tile.item)"
+                >
+                  @if (tile.item.isPaid) {
+                    <svg lucideCheck [size]="16"></svg>
                   }
+                </button>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-semibold">{{ tile.item.name }}</h3>
+                    <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="categoryMeta[tile.item.category].badgeClass">
+                      {{ categoryMeta[tile.item.category].label }}
+                    </span>
+                    @if (tile.item.isPaid) {
+                      <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
+                        Paid{{ tile.item.paymentSource ? ' · ' + tile.item.paymentSource : '' }}
+                      </span>
+                    }
+                  </div>
+                  <p class="mt-1 text-sm text-slate-400">Due {{ shortDate(tile.item.dueDate) }}@if (tile.item.paymentNote) { · {{ tile.item.paymentNote }} }</p>
                 </div>
-                <p class="mt-1 text-sm text-slate-400">Due {{ shortDate(item.dueDate) }}@if (item.paymentNote) { · {{ item.paymentNote }} }</p>
               </div>
-            </div>
-            <div class="mt-3 grid gap-3 sm:grid-cols-2">
-              <label class="block text-xs text-slate-400">
-                Planned amount
-                <input
-                  class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white disabled:opacity-60"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [disabled]="item.isPaid"
-                  [value]="item.plannedAmount"
-                  (change)="updateAmount(cycle.id, item.id, 'plannedAmount', $event)"
-                />
-              </label>
-              <label class="block text-xs text-slate-400">
-                Actual paid
-                <input
-                  class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [value]="item.actualPaidAmount || ''"
-                  placeholder="0.00"
-                  (change)="updateAmount(cycle.id, item.id, 'actualPaidAmount', $event)"
-                />
-              </label>
-            </div>
-          </li>
+              <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <label class="block text-xs text-slate-400">
+                  Planned amount
+                  <input
+                    class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white disabled:opacity-60"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    [disabled]="tile.item.isPaid"
+                    [value]="tile.item.plannedAmount"
+                    (change)="updateAmount(cycle.id, tile.item.id, 'plannedAmount', $event)"
+                  />
+                </label>
+                <label class="block text-xs text-slate-400">
+                  Actual paid
+                  <input
+                    class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    [value]="tile.item.actualPaidAmount || ''"
+                    placeholder="0.00"
+                    (change)="updateAmount(cycle.id, tile.item.id, 'actualPaidAmount', $event)"
+                  />
+                </label>
+              </div>
+            </li>
+          } @else {
+            <li class="rounded-3xl border border-sky-400/25 bg-slate-900/70 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="grid h-8 w-8 place-items-center rounded-xl bg-sky-400/20 text-sky-100">
+                      <svg lucideUsers [size]="16"></svg>
+                    </span>
+                    <h3 class="font-semibold">{{ tile.expense.name }}</h3>
+                    <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-semibold text-sky-200">Shared bill</span>
+                  </div>
+                  <p class="mt-1 text-sm text-slate-400">Due {{ shortDate(tile.expense.expenseDate) }} · {{ tile.expense.shares.length }} {{ tile.expense.shares.length === 1 ? 'person' : 'people' }}</p>
+                </div>
+                <div class="text-right text-sm">
+                  <p class="text-xs text-slate-500">Target total</p>
+                  <p class="font-mono font-semibold">{{ tile.expense.totalAmount | php }}</p>
+                  <p class="mt-1 text-xs text-slate-500">Remaining</p>
+                  <p class="font-mono text-sky-200">{{ sharedRemaining(tile) | php }}</p>
+                </div>
+              </div>
+              @if (tile.yours) {
+                <div class="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <div class="flex items-start gap-3">
+                    <button
+                      type="button"
+                      class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border"
+                      [ngClass]="tile.yours.isPaid ? 'border-emerald-300 bg-emerald-300 text-slate-950' : 'border-white/20'"
+                      [attr.aria-pressed]="tile.yours.isPaid"
+                      aria-label="Your share paid"
+                      (click)="onPaidClick(cycle, tile.yours)"
+                    >
+                      @if (tile.yours.isPaid) {
+                        <svg lucideCheck [size]="16"></svg>
+                      }
+                    </button>
+                    <div class="min-w-0 flex-1">
+                      <p class="font-semibold">Your share</p>
+                      <p class="font-mono text-sm">{{ tile.yours.plannedAmount | php }}</p>
+                      @if (tile.yours.isPaid) {
+                        <p class="mt-1 text-xs text-emerald-200">Paid{{ tile.yours.paymentSource ? ' · ' + tile.yours.paymentSource : '' }}</p>
+                      }
+                    </div>
+                  </div>
+                </div>
+              }
+              <ul class="mt-3 space-y-2">
+                @for (person of tile.people; track person.share.id) {
+                  <li class="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p class="font-semibold">{{ person.share.name }}</p>
+                        <p class="font-mono text-sm text-slate-300">{{ person.share.amount | php }}</p>
+                        @if (person.share.paid && person.share.paidOn) {
+                          <p class="mt-1 text-xs text-emerald-200">Paid {{ longDate(person.share.paidOn) }} · not added to savings</p>
+                        }
+                      </div>
+                      <div class="flex flex-wrap items-center gap-3">
+                        <label class="flex items-center gap-2 text-sm">
+                          <input type="checkbox" [checked]="person.share.paid" (change)="toggleSharePaid(tile.expense.id, person.share, $event)" />
+                          Paid
+                        </label>
+                        @if (person.share.paid) {
+                          <label class="text-xs text-slate-400">
+                            Paid date
+                            <input class="mt-1 block rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" type="date" [value]="person.share.paidOn || today" (change)="changeSharePaidOn(tile.expense.id, person.share, $event)" />
+                          </label>
+                        }
+                      </div>
+                    </div>
+                  </li>
+                }
+              </ul>
+            </li>
+          }
         }
       </ul>
     }
@@ -399,11 +483,6 @@ export class CutoffPlannerComponent {
       });
   }
 
-  setPair(event: Event): void {
-    this.budget.setCutoffPair(this.choice(event) === '15_30' ? '15_30' : '10_25');
-    this.selectedId.set(null);
-  }
-
   incomeHeading(cycle: PaycheckCycle): string {
     const names = this.budget
       .cutoffIncomeLines(cycle)
@@ -433,6 +512,52 @@ export class CutoffPlannerComponent {
 
   paidCount(cycle: PaycheckCycle): number {
     return cycle.allocations.filter((item) => item.isPaid).length;
+  }
+
+  paymentTiles(cycle: PaycheckCycle): PaymentTile[] {
+    const seen = new Set<string>();
+    const tiles: PaymentTile[] = [];
+    for (const item of cycle.allocations) {
+      if (item.sharedExpenseId) {
+        if (seen.has(item.sharedExpenseId)) continue;
+        seen.add(item.sharedExpenseId);
+        const expense = this.budget.sharedExpenses().find((row) => row.id === item.sharedExpenseId);
+        if (!expense) {
+          tiles.push({ kind: 'bill', id: item.id, item });
+          continue;
+        }
+        const rows = cycle.allocations.filter((row) => row.sharedExpenseId === expense.id);
+        tiles.push({
+          kind: 'shared',
+          id: expense.id,
+          expense,
+          yours: rows.find((row) => !row.shareId),
+          people: expense.shares.map((share) => ({ share, row: rows.find((row) => row.shareId === share.id) })),
+        });
+        continue;
+      }
+      tiles.push({ kind: 'bill', id: item.id, item });
+    }
+    return tiles;
+  }
+
+  sharedRemaining(tile: PaymentTile): number {
+    if (tile.kind !== 'shared') return 0;
+    const theirsPaid = tile.expense.shares.filter((share) => share.paid).reduce((sum, share) => sum + share.amount, 0);
+    const yoursPaid = tile.yours?.isPaid ? tile.yours.plannedAmount : 0;
+    return round2(Math.max(0, tile.expense.totalAmount - theirsPaid - yoursPaid));
+  }
+
+  toggleSharePaid(expenseId: string, share: SharedExpenseShare, event: Event): void {
+    const paid = (event.target as HTMLInputElement).checked;
+    const date = (event.target as HTMLInputElement).closest('li')?.querySelector<HTMLInputElement>('input[type="date"]')?.value;
+    this.budget.setSharePaid(expenseId, share.id, paid, date || this.today);
+  }
+
+  changeSharePaidOn(expenseId: string, share: SharedExpenseShare, event: Event): void {
+    const date = (event.target as HTMLInputElement).value;
+    if (!share.paid || !date) return;
+    this.budget.setSharePaid(expenseId, share.id, true, date);
   }
 
   reserveMax(cycle: PaycheckCycle): number {
@@ -618,3 +743,13 @@ interface PayRow {
   key: string;
   amount: string;
 }
+
+type PaymentTile =
+  | { kind: 'bill'; id: string; item: CutoffAllocationItem }
+  | {
+      kind: 'shared';
+      id: string;
+      expense: SharedExpense;
+      yours?: CutoffAllocationItem;
+      people: { share: SharedExpenseShare; row?: CutoffAllocationItem }[];
+    };

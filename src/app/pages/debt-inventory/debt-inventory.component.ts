@@ -1,7 +1,7 @@
 import { NgClass } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { LucidePencil, LucidePlus, LucideTrash2, LucideX } from '@lucide/angular';
-import { CATEGORY_FILTERS, CATEGORY_META, categoryLabel, cutoffDays, cutoffFromDueDay, cutoffLabel, fundingCutoffDate, isPairCutoff } from '../../core/categories';
+import { CATEGORY_FILTERS, CATEGORY_META, categoryLabel, cutoffDays, cutoffFromDueDay, cutoffLabel, fundingCutoffDate, isPairCutoff, pairFromCutoff } from '../../core/categories';
 import { formatLongDate, ordinalDay, shiftMonth, todayIso } from '../../core/dates';
 import { parseMoney, round2 } from '../../core/money';
 import { MONTH_OPTIONS, collectYears, rangeOverlapsPeriod } from '../../core/period';
@@ -29,6 +29,8 @@ interface EditorState {
   status: ItemStatus;
   notes: string;
   addToCycles: boolean;
+  isShared: boolean;
+  people: { key: string; name: string; amount: string }[];
 }
 
 type EditorField = 'bankName' | 'status' | 'balance' | 'monthly' | 'minimum' | 'terms' | 'startDate' | 'endDate';
@@ -131,10 +133,13 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
                 {{ categoryMeta[item.category].label }}
                 · {{ cutoffLabel(item.assignedCutoff) }}
                 · due {{ dueLabel(item) }}
+                @if (budget.sharedExpenseForLiability(item.id); as shared) {
+                  · shared with {{ shared.shares.length }} {{ shared.shares.length === 1 ? 'person' : 'people' }}
+                }
               </p>
             </div>
             <p class="shrink-0 font-mono text-base font-semibold">
-              {{ item.category === 'LIVING_EXPENSE' ? (item.monthlyAmortization | php) : (item.totalBalance | php) }}
+              {{ billAmount(item) | php }}
             </p>
           </div>
           @if (item.splitAcrossCutoffs || isPair(item.assignedCutoff)) {
@@ -175,7 +180,7 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
             <span class="text-sm">Type *</span>
             <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.category" (change)="onCategory($event)">
               @for (option of categories; track option) {
-                <option [value]="option">{{ categoryLabel(option) }}</option>
+                <option [value]="option" [selected]="form.category === option">{{ categoryLabel(option) }}</option>
               }
             </select>
           </label>
@@ -189,10 +194,10 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
             <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
               <span class="text-sm">Status</span>
               <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.status" (change)="onStatus($event)">
-                <option value="ACTIVE">Active</option>
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="PAST_DUE">Past due</option>
-                <option value="PAID">Paid</option>
+                <option value="ACTIVE" [selected]="form.status === 'ACTIVE'">Active</option>
+                <option value="SCHEDULED" [selected]="form.status === 'SCHEDULED'">Scheduled</option>
+                <option value="PAST_DUE" [selected]="form.status === 'PAST_DUE'">Past due</option>
+                <option value="PAID" [selected]="form.status === 'PAID'">Paid</option>
               </select>
             </label>
           }
@@ -220,13 +225,15 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
               <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
             </label>
           }
-          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
-            <span class="text-sm">Cutoff combination</span>
-            <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" (change)="setPair($event)">
-              <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
-              <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
-            </select>
-          </label>
+          @if (form.mode === 'add') {
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">Cutoff combination</span>
+              <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" (change)="setPair($event)">
+                <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
+                <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
+              </select>
+            </label>
+          }
           <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
             <span class="text-sm">Due date *</span>
             <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" type="date" [value]="form.dueDate" (input)="onDueDate($event)" />
@@ -263,6 +270,26 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
             <span class="text-sm sm:pt-2">Notes</span>
             <textarea class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" rows="2" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
           </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" [checked]="form.isShared" (change)="toggleShared($event)" />
+            This is also a shared expense / bill
+          </label>
+          @if (form.isShared) {
+            <div class="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-3">
+              <p class="text-sm text-sky-100">People on this bill. Your leftover is the total minus their shares. Payments shows one tile with the target, remaining, and who paid.</p>
+              <p class="mt-2 font-mono text-sm">Your share {{ sharedYours(form) | php }}</p>
+              <div class="mt-3 space-y-2">
+                @for (person of form.people; track person.key) {
+                  <div class="grid gap-2 sm:grid-cols-[1fr_7rem_auto]">
+                    <input class="w-full min-w-0 rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base" placeholder="Name" [value]="person.name" (input)="patchPerson(person.key, 'name', inputValue($event))" />
+                    <input class="w-full min-w-0 rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base font-mono" type="number" min="0" step="0.01" placeholder="Share" [value]="person.amount" (input)="patchPerson(person.key, 'amount', inputValue($event))" />
+                    <button type="button" class="rounded-xl border border-white/15 px-3 py-2 text-sm text-rose-200" (click)="removePerson(person.key)">Remove</button>
+                  </div>
+                }
+              </div>
+              <button type="button" class="mt-3 rounded-2xl border border-white/15 px-3 py-2 text-sm" (click)="addPerson()">Add person</button>
+            </div>
+          }
         </div>
           @if (form.mode === 'add' && form.category === 'FIXED_LOAN' && loanTotal(form) > 0) {
             <p class="mt-3 text-sm text-slate-400">
@@ -374,6 +401,12 @@ export class DebtInventoryComponent {
     return `Due ${formatLongDate(form.dueDate)} · falls on the ${formatLongDate(funded.cutoffDate)} cutoff.`;
   }
 
+  billAmount(item: LiabilityItem): number {
+    const shared = this.budget.sharedExpenseForLiability(item.id);
+    if (shared) return shared.totalAmount;
+    return item.category === 'LIVING_EXPENSE' ? item.monthlyAmortization : item.totalBalance;
+  }
+
   splitHint(item: LiabilityItem): string {
     const parts = cutoffDays(item.assignedCutoff);
     const amount = item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance;
@@ -406,7 +439,7 @@ export class DebtInventoryComponent {
   }
 
   cutoffChoices(form: EditorState): { value: AssignedCutoff; label: string }[] {
-    const pair = this.budget.cutoffPair();
+    const pair = form.mode === 'edit' ? pairFromCutoff(form.cutoff) : this.budget.cutoffPair();
     const options: { value: AssignedCutoff; label: string }[] =
       pair === '15_30'
         ? [
@@ -447,6 +480,8 @@ export class DebtInventoryComponent {
       status: 'ACTIVE',
       notes: '',
       addToCycles: true,
+      isShared: false,
+      people: [],
     });
   }
 
@@ -578,6 +613,14 @@ export class DebtInventoryComponent {
     if (monthlyAmortization > totalBalance && category !== 'LIVING_EXPENSE' && category !== 'FIXED_LOAN') {
       monthlyAmortization = totalBalance;
     }
+    if (form.isShared) {
+      const total = this.shows(form, 'monthly') ? monthlyAmortization : totalBalance;
+      const theirs = this.sharedPeople(form).reduce((sum, person) => sum + person.amount, 0);
+      if (theirs > total + 0.001) {
+        this.formError.set('Those shares are more than the bill total.');
+        return;
+      }
+    }
 
     const funded = fundingCutoffDate(form.dueDate, this.budget.cutoffPair());
     const chosenStart = this.shows(form, 'startDate') ? form.startDate || form.dueDate : adding ? funded.cutoffDate : form.startDate;
@@ -600,14 +643,16 @@ export class DebtInventoryComponent {
       endDate: this.shows(form, 'endDate') || !adding ? form.endDate : '',
       status: form.status,
       notes: form.notes,
-      addToFutureCutoffs: form.addToCycles,
+      addToFutureCutoffs: adding ? form.addToCycles : undefined,
+      sharedPeople: form.isShared ? this.sharedPeople(form) : undefined,
+      sharedExpenseDate: form.dueDate,
     };
     const savedName = form.name.trim();
     if (form.mode === 'add') {
-      const firstCutoff = this.budget.addLiability(draft);
+      const saved = this.budget.addLiability(draft);
       this.notice.set(
-        firstCutoff
-          ? `${savedName} was added to the ${formatLongDate(firstCutoff)} payments cutoff.`
+        saved.cutoff
+          ? `${savedName} was added to the ${formatLongDate(saved.cutoff)} payments cutoff.`
           : `${savedName} was added.`,
       );
     } else if (form.id) {
@@ -625,18 +670,60 @@ export class DebtInventoryComponent {
     this.pendingDelete.set(null);
   }
 
+  toggleShared(event: Event): void {
+    const isShared = this.checkedValue(event);
+    const form = this.editor();
+    this.patch({
+      isShared,
+      people: isShared && form && form.people.length === 0 ? [{ key: crypto.randomUUID(), name: '', amount: '' }] : form?.people ?? [],
+    });
+  }
+
+  addPerson(): void {
+    const form = this.editor();
+    if (!form) return;
+    this.patch({ people: [...form.people, { key: crypto.randomUUID(), name: '', amount: '' }] });
+  }
+
+  removePerson(key: string): void {
+    const form = this.editor();
+    if (!form) return;
+    this.patch({ people: form.people.filter((person) => person.key !== key) });
+  }
+
+  patchPerson(key: string, field: 'name' | 'amount', value: string): void {
+    const form = this.editor();
+    if (!form) return;
+    this.patch({ people: form.people.map((person) => (person.key === key ? { ...person, [field]: value } : person)) });
+  }
+
+  sharedPeople(form: EditorState): { name: string; amount: number }[] {
+    return form.people
+      .map((person) => ({ name: person.name.trim(), amount: parseMoney(person.amount) }))
+      .filter((person) => person.name && person.amount > 0);
+  }
+
+  sharedYours(form: EditorState): number {
+    const total = this.shows(form, 'monthly') ? parseMoney(form.monthlyAmortization) : parseMoney(form.totalBalance);
+    const theirs = this.sharedPeople(form).reduce((sum, person) => sum + person.amount, 0);
+    return round2(Math.max(0, total - theirs));
+  }
+
   private fromItem(item: LiabilityItem, mode: EditorState['mode']): EditorState {
+    const shared = this.budget.sharedExpenseForLiability(item.id);
+    const total = shared?.totalAmount ?? item.totalBalance;
+    const monthly = shared?.totalAmount ?? item.monthlyAmortization;
     return {
       mode,
       id: item.id,
       name: item.name,
       bankName: item.bankName ?? '',
       category: item.category,
-      totalBalance: String(item.totalBalance),
-      monthlyAmortization: String(item.monthlyAmortization || ''),
+      totalBalance: String(total),
+      monthlyAmortization: String(monthly || ''),
       minimumDue: item.minimumDue ? String(item.minimumDue) : '',
       dueDay: String(item.dueDayOfMonth),
-      dueDate: shiftMonth(item.startDate || todayIso(), 0, item.dueDayOfMonth),
+      dueDate: this.budget.nextUnpaidDue(item.id) ?? shiftMonth(item.startDate || todayIso(), 0, item.dueDayOfMonth),
       cutoff: item.assignedCutoff,
       terms: item.remainingTerms != null ? String(item.remainingTerms) : '',
       startDate: item.startDate,
@@ -644,6 +731,8 @@ export class DebtInventoryComponent {
       status: item.status,
       notes: item.notes ?? '',
       addToCycles: false,
+      isShared: Boolean(shared),
+      people: (shared?.shares ?? []).map((share) => ({ key: share.id, name: share.name, amount: String(share.amount) })),
     };
   }
 }
