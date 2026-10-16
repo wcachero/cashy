@@ -1,8 +1,8 @@
 import { NgClass } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { LucidePencil, LucidePlus, LucideTrash2, LucideX } from '@lucide/angular';
-import { CATEGORY_FILTERS, CATEGORY_META, categoryLabel, cutoffDays, cutoffLabel, isPairCutoff } from '../../core/categories';
-import { formatLongDate, todayIso } from '../../core/dates';
+import { CATEGORY_FILTERS, CATEGORY_META, categoryLabel, cutoffDays, cutoffFromDueDay, cutoffLabel, fundingCutoffDate, isPairCutoff } from '../../core/categories';
+import { formatLongDate, ordinalDay, shiftMonth, todayIso } from '../../core/dates';
 import { parseMoney, round2 } from '../../core/money';
 import { MONTH_OPTIONS, collectYears, rangeOverlapsPeriod } from '../../core/period';
 import { AssignedCutoff, ItemStatus, LiabilityCategory, LiabilityItem } from '../../models/budget.model';
@@ -21,6 +21,7 @@ interface EditorState {
   monthlyAmortization: string;
   minimumDue: string;
   dueDay: string;
+  dueDate: string;
   cutoff: AssignedCutoff;
   terms: string;
   startDate: string;
@@ -52,7 +53,7 @@ const FILTER_CHIPS: { id: (typeof CATEGORY_FILTERS)[number]; label: string }[] =
 ];
 
 const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
-  FIXED_LOAN: 'Same amount every month. Pick 10th and 25th to split that amount across both paydays.',
+  FIXED_LOAN: 'Same amount every month. Split across both paydays in your cutoff combination, or pick one payday.',
   REVOLVING_CC: 'Card balance with a minimum due. The planned payment goes on each matching cutoff.',
   ONE_TIME_OLA: 'Paid once. A cutoff pair splits that amount across those two paydays.',
   PAST_DUE_OLA: 'Overdue balance. The monthly amount is what you plan to pay each cutoff.',
@@ -129,9 +130,7 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
               <p class="mt-0.5 text-xs text-slate-400">
                 {{ categoryMeta[item.category].label }}
                 · {{ cutoffLabel(item.assignedCutoff) }}
-                @if (!isPair(item.assignedCutoff)) {
-                  · due {{ item.dueDayOfMonth }}
-                }
+                · due {{ dueLabel(item) }}
               </p>
             </div>
             <p class="shrink-0 font-mono text-base font-semibold">
@@ -167,29 +166,29 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
         </div>
 
         <p class="mt-2 text-left text-sm text-slate-400">{{ categoryHint(form.category) }}</p>
-        <div class="mt-4 grid gap-3 text-left">
-          <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-            <span>Name *</span>
-            <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" [value]="form.name" [placeholder]="namePlaceholder(form.category)" (input)="patch({ name: inputValue($event) })" />
+        <div class="mt-4 grid min-w-0 gap-3 text-left">
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+            <span class="text-sm">Name *</span>
+            <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.name" [placeholder]="namePlaceholder(form.category)" (input)="patch({ name: inputValue($event) })" />
           </label>
-          <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-            <span>Type *</span>
-            <select class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" [value]="form.category" (change)="onCategory($event)">
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+            <span class="text-sm">Type *</span>
+            <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.category" (change)="onCategory($event)">
               @for (option of categories; track option) {
                 <option [value]="option">{{ categoryLabel(option) }}</option>
               }
             </select>
           </label>
           @if (shows(form, 'bankName')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>Lender / app</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" [value]="form.bankName" placeholder="BPI, GCash, SSS" (input)="patch({ bankName: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">Lender / app</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.bankName" placeholder="BPI, GCash, SSS" (input)="patch({ bankName: inputValue($event) })" />
             </label>
           }
           @if (shows(form, 'status')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>Status</span>
-              <select class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" [value]="form.status" (change)="onStatus($event)">
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">Status</span>
+              <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.status" (change)="onStatus($event)">
                 <option value="ACTIVE">Active</option>
                 <option value="SCHEDULED">Scheduled</option>
                 <option value="PAST_DUE">Past due</option>
@@ -198,69 +197,71 @@ const CATEGORY_HINTS: Record<LiabilityCategory, string> = {
             </label>
           }
           @if (shows(form, 'balance')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>{{ form.category === 'ONE_TIME_OLA' ? 'Amount *' : 'Balance *' }}</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left font-mono" type="number" min="0" step="0.01" [value]="form.totalBalance" (input)="patch({ totalBalance: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">{{ form.category === 'ONE_TIME_OLA' ? 'Amount *' : 'Balance *' }}</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left font-mono" type="number" min="0" step="0.01" [value]="form.totalBalance" (input)="patch({ totalBalance: inputValue($event) })" />
             </label>
           }
           @if (shows(form, 'monthly')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>{{ monthlyLabel(form.category) }} *</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left font-mono" type="number" min="0" step="0.01" [value]="form.monthlyAmortization" (input)="patch({ monthlyAmortization: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">{{ monthlyLabel(form.category) }} *</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left font-mono" type="number" min="0" step="0.01" [value]="form.monthlyAmortization" (input)="patch({ monthlyAmortization: inputValue($event) })" />
             </label>
           }
           @if (shows(form, 'minimum')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>Minimum due</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left font-mono" type="number" min="0" step="0.01" [value]="form.minimumDue" (input)="patch({ minimumDue: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">Minimum due</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left font-mono" type="number" min="0" step="0.01" [value]="form.minimumDue" (input)="patch({ minimumDue: inputValue($event) })" />
             </label>
           }
           @if (shows(form, 'terms')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>{{ form.category === 'FIXED_LOAN' ? 'Months *' : 'Terms left' }}</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">{{ form.category === 'FIXED_LOAN' ? 'Months *' : 'Terms left' }}</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left font-mono" type="number" min="0" step="1" [value]="form.terms" (input)="patch({ terms: inputValue($event) })" />
             </label>
           }
-          <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-            <span>Pay from *</span>
-            <select class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" [value]="form.cutoff" (change)="onCutoff($event)">
-              <optgroup label="10th and 25th">
-                <option value="10TH_CUTOFF">10th only</option>
-                <option value="25TH_CUTOFF">25th only</option>
-                <option value="BOTH">10th and 25th · split amount</option>
-              </optgroup>
-              <optgroup label="15th and 30th">
-                <option value="15TH_CUTOFF">15th only</option>
-                <option value="30TH_CUTOFF">30th only</option>
-                <option value="15_30">15th and 30th · split amount</option>
-              </optgroup>
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+            <span class="text-sm">Cutoff combination</span>
+            <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" (change)="setPair($event)">
+              <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
+              <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
+            </select>
+          </label>
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+            <span class="text-sm">Due date *</span>
+            <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" type="date" [value]="form.dueDate" (input)="onDueDate($event)" />
+          </label>
+          <p class="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-left text-sm text-emerald-100">
+            {{ duePreview(form) }}
+          </p>
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+            <span class="text-sm">Pay from *</span>
+            <select class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" [value]="form.cutoff" (change)="onCutoff($event)">
+              @for (option of cutoffChoices(form); track option.value) {
+                <option [value]="option.value" [selected]="form.cutoff === option.value">{{ option.label }}</option>
+              }
             </select>
           </label>
           @if (isPair(form.cutoff)) {
-            <p class="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-left text-sm text-emerald-100">
+            <p class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-slate-300">
               {{ splitPreview(form) }}
             </p>
-          } @else {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>Due day *</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" type="number" min="1" max="31" [value]="form.dueDay" (input)="patch({ dueDay: inputValue($event) })" />
-            </label>
           }
           @if (shows(form, 'startDate')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>{{ form.category === 'FIXED_LOAN' ? 'First month' : 'Start date' }}</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" type="date" [value]="form.startDate" (input)="patch({ startDate: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">{{ form.category === 'FIXED_LOAN' ? 'First month' : 'Start date' }}</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" type="date" [value]="form.startDate" (input)="patch({ startDate: inputValue($event) })" />
             </label>
           }
           @if (shows(form, 'endDate')) {
-            <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 text-sm">
-              <span>End date</span>
-              <input class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" type="date" [value]="form.endDate" (input)="patch({ endDate: inputValue($event) })" />
+            <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+              <span class="text-sm">End date</span>
+              <input class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" type="date" [value]="form.endDate" (input)="patch({ endDate: inputValue($event) })" />
             </label>
           }
-          <label class="grid grid-cols-[7rem_minmax(0,1fr)] items-start gap-3 text-sm">
-            <span class="pt-2">Notes</span>
-            <textarea class="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-left" rows="2" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
+          <label class="grid gap-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:items-start sm:gap-3">
+            <span class="text-sm sm:pt-2">Notes</span>
+            <textarea class="w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-base text-left" rows="2" [value]="form.notes" (input)="patch({ notes: inputValue($event) })"></textarea>
           </label>
         </div>
           @if (form.mode === 'add' && form.category === 'FIXED_LOAN' && loanTotal(form) > 0) {
@@ -361,6 +362,18 @@ export class DebtInventoryComponent {
     return 'Bill name';
   }
 
+  dueLabel(item: LiabilityItem): string {
+    if (this.isPair(item.assignedCutoff)) return `each ${cutoffLabel(item.assignedCutoff)} cutoff`;
+    return `the ${ordinalDay(item.dueDayOfMonth)}`;
+  }
+
+  duePreview(form: EditorState): string {
+    if (!form.dueDate) return 'Pick a due date to place this on a cutoff.';
+    if (this.isPair(form.cutoff)) return `Due date ${formatLongDate(form.dueDate)}. Amount is split; each slice is due on that cutoff date.`;
+    const funded = fundingCutoffDate(form.dueDate, this.budget.cutoffPair());
+    return `Due ${formatLongDate(form.dueDate)} · falls on the ${formatLongDate(funded.cutoffDate)} cutoff.`;
+  }
+
   splitHint(item: LiabilityItem): string {
     const parts = cutoffDays(item.assignedCutoff);
     const amount = item.monthlyAmortization > 0 ? item.monthlyAmortization : item.totalBalance;
@@ -392,8 +405,31 @@ export class DebtInventoryComponent {
     return 'th';
   }
 
+  cutoffChoices(form: EditorState): { value: AssignedCutoff; label: string }[] {
+    const pair = this.budget.cutoffPair();
+    const options: { value: AssignedCutoff; label: string }[] =
+      pair === '15_30'
+        ? [
+            { value: '15TH_CUTOFF', label: '15th only' },
+            { value: '30TH_CUTOFF', label: '30th only' },
+            { value: '15_30', label: '15th and 30th · split amount' },
+          ]
+        : [
+            { value: '10TH_CUTOFF', label: '10th only' },
+            { value: '25TH_CUTOFF', label: '25th only' },
+            { value: 'BOTH', label: '10th and 25th · split amount' },
+          ];
+    if (!options.some((option) => option.value === form.cutoff)) {
+      options.unshift({ value: form.cutoff, label: cutoffLabel(form.cutoff) });
+    }
+    return options;
+  }
+
   openAdd(): void {
     this.formError.set('');
+    const pair = this.budget.cutoffPair();
+    const dueDate = todayIso();
+    const day = Number(dueDate.slice(8, 10)) || 1;
     this.editor.set({
       mode: 'add',
       name: '',
@@ -402,8 +438,9 @@ export class DebtInventoryComponent {
       totalBalance: '',
       monthlyAmortization: '',
       minimumDue: '',
-      dueDay: '25',
-      cutoff: '25TH_CUTOFF',
+      dueDay: String(day),
+      dueDate,
+      cutoff: cutoffFromDueDay(day, pair),
       terms: '',
       startDate: todayIso(),
       endDate: '',
@@ -462,10 +499,33 @@ export class DebtInventoryComponent {
     this.patch({ status: this.selectValue(event) as ItemStatus });
   }
 
+  setPair(event: Event): void {
+    const pair = this.selectValue(event) === '15_30' ? '15_30' : '10_25';
+    this.budget.setCutoffPair(pair);
+    const form = this.editor();
+    if (!form) return;
+    const day = Number(form.dueDate.slice(8, 10)) || Number(form.dueDay) || 1;
+    this.patch({
+      dueDay: String(day),
+      cutoff: this.isPair(form.cutoff) ? (pair === '15_30' ? '15_30' : 'BOTH') : cutoffFromDueDay(day, pair),
+    });
+  }
+
+  onDueDate(event: Event): void {
+    const dueDate = this.inputValue(event);
+    const day = Number(dueDate.slice(8, 10)) || 1;
+    const form = this.editor();
+    const mapped = cutoffFromDueDay(day, this.budget.cutoffPair());
+    this.patch({
+      dueDate,
+      dueDay: String(day),
+      cutoff: form && this.isPair(form.cutoff) ? form.cutoff : mapped,
+    });
+  }
+
   onCutoff(event: Event): void {
     const cutoff = this.selectValue(event) as AssignedCutoff;
-    const dueDay = cutoff === '15_30' ? '30' : cutoff === 'BOTH' ? '25' : cutoff.startsWith('15') ? '15' : cutoff.startsWith('30') ? '30' : cutoff.startsWith('10') ? '10' : '25';
-    this.patch({ cutoff, dueDay });
+    this.patch({ cutoff });
   }
 
   saveEditor(): void {
@@ -475,10 +535,14 @@ export class DebtInventoryComponent {
       this.formError.set('Give the bill a name.');
       return;
     }
+    if (!form.dueDate) {
+      this.formError.set('Pick a due date so this bill can land on a cutoff.');
+      return;
+    }
     const pair = isPairCutoff(form.cutoff);
-    const dueDay = pair ? (form.cutoff === '15_30' ? 30 : 25) : Number(form.dueDay);
-    if (!pair && (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31)) {
-      this.formError.set('Due day must be between 1 and 31.');
+    const dueDay = Number(form.dueDate.slice(8, 10)) || Number(form.dueDay);
+    if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31) {
+      this.formError.set('Pick a due date so this bill can land on a cutoff.');
       return;
     }
     const adding = form.mode === 'add';
@@ -515,6 +579,12 @@ export class DebtInventoryComponent {
       monthlyAmortization = totalBalance;
     }
 
+    const funded = fundingCutoffDate(form.dueDate, this.budget.cutoffPair());
+    const chosenStart = this.shows(form, 'startDate') ? form.startDate || form.dueDate : adding ? funded.cutoffDate : form.startDate;
+    const startDate =
+      adding && chosenStart.slice(0, 7) === form.dueDate.slice(0, 7) && chosenStart > funded.cutoffDate
+        ? funded.cutoffDate
+        : chosenStart || funded.cutoffDate;
     const draft = {
       name: form.name,
       bankName: this.shows(form, 'bankName') || !adding ? form.bankName : '',
@@ -526,7 +596,7 @@ export class DebtInventoryComponent {
       assignedCutoff: form.cutoff,
       splitAcrossCutoffs: pair,
       remainingTerms,
-      startDate: this.shows(form, 'startDate') ? form.startDate || todayIso() : adding ? todayIso() : form.startDate,
+      startDate,
       endDate: this.shows(form, 'endDate') || !adding ? form.endDate : '',
       status: form.status,
       notes: form.notes,
@@ -566,6 +636,7 @@ export class DebtInventoryComponent {
       monthlyAmortization: String(item.monthlyAmortization || ''),
       minimumDue: item.minimumDue ? String(item.minimumDue) : '',
       dueDay: String(item.dueDayOfMonth),
+      dueDate: shiftMonth(item.startDate || todayIso(), 0, item.dueDayOfMonth),
       cutoff: item.assignedCutoff,
       terms: item.remainingTerms != null ? String(item.remainingTerms) : '',
       startDate: item.startDate,

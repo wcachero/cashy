@@ -5,7 +5,7 @@ import { pairDays } from '../../core/categories';
 import { formatLongDate, formatShortDate, matchesCutoffDays, ordinalDay, shiftMonth, todayIso } from '../../core/dates';
 import { formatPhp, parseMoney, round2 } from '../../core/money';
 import { collectYears, dateInPeriod } from '../../core/period';
-import { CASH_DEPOSIT_ID, CutoffPair, CutoffType, IncomeStream, PaycheckCycle, Receivable } from '../../models/budget.model';
+import { CASH_DEPOSIT_ID, CutoffType, IncomeStream, PaycheckCycle, Receivable } from '../../models/budget.model';
 import { BudgetStateService } from '../../services/budget-state.service';
 import { PhpPipe } from '../../shared/php.pipe';
 import { ModalComponent } from '../../shared/modal.component';
@@ -87,8 +87,8 @@ const PAGE_SIZE = 10;
         <label class="text-xs text-slate-400">
           Cutoff combination
           <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="setPair($event)">
-            <option value="10_25" [selected]="pair() === '10_25'">10th and 25th</option>
-            <option value="15_30" [selected]="pair() === '15_30'">15th and 30th</option>
+            <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
+            <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
           </select>
         </label>
         <label class="text-xs text-slate-400">
@@ -128,8 +128,8 @@ const PAGE_SIZE = 10;
         <label class="text-xs text-slate-400">
           Cutoff combination
           <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" (change)="setPair($event)">
-            <option value="10_25" [selected]="pair() === '10_25'">10th and 25th</option>
-            <option value="15_30" [selected]="pair() === '15_30'">15th and 30th</option>
+            <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
+            <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
           </select>
         </label>
         <label class="text-xs text-slate-400">
@@ -516,7 +516,6 @@ export class IncomeComponent {
   readonly borrowedOn = signal('');
   readonly remarks = signal('');
   readonly receivedOn = signal(todayIso());
-  readonly pair = signal<CutoffPair>('10_25');
   readonly cycleId = signal('');
   readonly month = signal('all');
   readonly year = signal('all');
@@ -541,7 +540,7 @@ export class IncomeComponent {
     const years = new Set<number>([Number(todayIso().slice(0, 4))]);
     for (const cycle of cycles) years.add(Number(cycle.cutoffDate.slice(0, 4)));
     const dates = new Set<string>([...byDate.keys(), ...standardSalaryCutoffDates([...years])]);
-    const days = pairDays(this.pair());
+    const days = pairDays(this.budget.cutoffPair());
     return [...dates]
       .sort()
       .filter((date) => matchesCutoffDays(date, days))
@@ -672,8 +671,7 @@ export class IncomeComponent {
   }
 
   setPair(event: Event): void {
-    const value = this.choice(event);
-    this.pair.set(value === '15_30' ? '15_30' : '10_25');
+    this.budget.setCutoffPair(this.choice(event) === '15_30' ? '15_30' : '10_25');
     this.cycleId.set('');
   }
 

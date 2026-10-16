@@ -3,8 +3,8 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { LucideCheck, LucidePiggyBank, LucidePlus, LucideTrash2 } from '@lucide/angular';
-import { CATEGORY_META } from '../../core/categories';
-import { formatLongDate, formatShortDate, todayIso } from '../../core/dates';
+import { CATEGORY_META, pairDays, pairLabel } from '../../core/categories';
+import { formatLongDate, formatShortDate, matchesCutoffDays, todayIso } from '../../core/dates';
 import { parseMoney, round2 } from '../../core/money';
 import { CutoffAllocationItem, PaycheckCycle } from '../../models/budget.model';
 import { BudgetStateService, CutoffIncomeLine } from '../../services/budget-state.service';
@@ -24,24 +24,33 @@ import { PhpPipe } from '../../shared/php.pipe';
       </p>
     </section>
 
-    <label class="mt-5 block max-w-md text-xs text-slate-400">
-      Cutoff
-      <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="selectedId.set(choice($event))">
-        @for (group of cutoffGroups(); track group.year) {
-          <optgroup [label]="group.year">
-            @for (cycle of group.rows; track cycle.id) {
-              <option [value]="cycle.id" [selected]="selected().id === cycle.id">
-                {{ longDate(cycle.cutoffDate) }} · {{ paidCount(cycle) }}/{{ cycle.allocations.length }} paid
-              </option>
-            }
-          </optgroup>
-        }
-      </select>
-    </label>
+    <div class="mt-5 grid max-w-md gap-3">
+      <label class="block text-xs text-slate-400">
+        Cutoff combination
+        <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="setPair($event)">
+          <option value="10_25" [selected]="budget.cutoffPair() === '10_25'">10th and 25th</option>
+          <option value="15_30" [selected]="budget.cutoffPair() === '15_30'">15th and 30th</option>
+        </select>
+      </label>
+      <label class="block text-xs text-slate-400">
+        {{ pairName() }} cutoff
+        <select class="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white" (change)="selectedId.set(choice($event))">
+          @for (group of cutoffGroups(); track group.year) {
+            <optgroup [label]="group.year">
+              @for (cycle of group.rows; track cycle.id) {
+                <option [value]="cycle.id" [selected]="selected()?.id === cycle.id">
+                  {{ longDate(cycle.cutoffDate) }} · {{ paidCount(cycle) }}/{{ cycle.allocations.length }} paid
+                </option>
+              }
+            </optgroup>
+          }
+        </select>
+      </label>
+    </div>
 
-    @if (budget.paycheckCycles().length === 0) {
+    @if (pairCycles().length === 0) {
       <p class="mt-4 rounded-3xl border border-white/10 bg-slate-900/70 px-4 py-5 text-sm text-slate-400">
-        No cutoffs yet. Import your financial plan from Settings.
+        No {{ pairName() }} cutoffs yet. Pick this combination on Income, then add salary for those dates.
       </p>
     }
 
@@ -340,8 +349,15 @@ export class CutoffPlannerComponent {
   readonly payGap = computed(() => round2(Math.max(0, this.payTotal() - this.payCovered())));
   readonly payOverage = computed(() => round2(Math.max(0, this.payCovered() - this.payTotal())));
 
+  readonly pairCycles = computed(() => {
+    const days = pairDays(this.budget.cutoffPair());
+    return this.budget.paycheckCycles().filter((cycle) => matchesCutoffDays(cycle.cutoffDate, days));
+  });
+
+  readonly pairName = computed(() => pairLabel(this.budget.cutoffPair()));
+
   readonly selected = computed(() => {
-    const cycles = this.budget.paycheckCycles();
+    const cycles = this.pairCycles();
     const chosen = this.selectedId();
     if (chosen) {
       const match = cycles.find((cycle) => cycle.id === chosen);
@@ -351,14 +367,13 @@ export class CutoffPlannerComponent {
     return (
       cycles.find((cycle) => cycle.cutoffDate >= today) ??
       [...cycles].reverse().find((cycle) => cycle.cutoffDate <= today) ??
-      this.budget.upcomingCycle() ??
       cycles[0]
     );
   });
 
   readonly cutoffGroups = computed(() => {
     const groups: { year: string; rows: PaycheckCycle[] }[] = [];
-    for (const cycle of this.budget.paycheckCycles()) {
+    for (const cycle of this.pairCycles()) {
       const year = cycle.cutoffDate.slice(0, 4);
       const current = groups.find((group) => group.year === year);
       if (current) current.rows.push(cycle);
@@ -368,7 +383,7 @@ export class CutoffPlannerComponent {
   });
 
   readonly nextCycle = computed(() => {
-    const cycles = this.budget.paycheckCycles();
+    const cycles = this.pairCycles();
     const current = this.selected();
     const index = cycles.findIndex((cycle) => cycle.id === current?.id);
     return index >= 0 ? cycles[index + 1] : undefined;
@@ -382,6 +397,11 @@ export class CutoffPlannerComponent {
         const cycle = params.get('cycle');
         if (cycle) this.selectedId.set(cycle);
       });
+  }
+
+  setPair(event: Event): void {
+    this.budget.setCutoffPair(this.choice(event) === '15_30' ? '15_30' : '10_25');
+    this.selectedId.set(null);
   }
 
   incomeHeading(cycle: PaycheckCycle): string {

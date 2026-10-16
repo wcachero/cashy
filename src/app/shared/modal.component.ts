@@ -2,13 +2,18 @@ import { ChangeDetectionStrategy, Component, HostListener, OnDestroy, effect, in
 
 const modalStack: ModalComponent[] = [];
 
+function syncModalLock(): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.classList.toggle('modal-open', modalStack.length > 0);
+}
+
 @Component({
   selector: 'app-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
       <div
-        class="fixed inset-0 flex min-h-dvh justify-center p-3 sm:items-center sm:p-6"
+        class="fixed inset-0 flex w-full max-w-[100vw] justify-center overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-6"
         [class.items-end]="align() !== 'center'"
         [class.items-center]="align() === 'center'"
         [style.z-index]="layer()"
@@ -17,7 +22,7 @@ const modalStack: ModalComponent[] = [];
         <div
           role="dialog"
           aria-modal="true"
-          class="relative max-h-[min(90dvh,90vh)] w-full overflow-y-auto rounded-3xl border border-white/10 bg-slate-900 p-5 text-left shadow-2xl sm:p-6"
+          class="relative mb-[max(0.75rem,env(safe-area-inset-bottom))] max-h-[min(90dvh,90vh)] w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-slate-900 p-4 text-left shadow-2xl sm:p-6"
           [class.max-w-lg]="size() !== 'lg'"
           [class.max-w-3xl]="size() === 'lg'"
         >
@@ -40,12 +45,14 @@ export class ModalComponent implements OnDestroy {
       const index = modalStack.indexOf(this);
       if (isOpen && index < 0) modalStack.push(this);
       if (!isOpen && index >= 0) modalStack.splice(index, 1);
+      syncModalLock();
     });
   }
 
   ngOnDestroy(): void {
     const index = modalStack.indexOf(this);
     if (index >= 0) modalStack.splice(index, 1);
+    syncModalLock();
   }
 
   @HostListener('document:keydown.escape')

@@ -1,3 +1,4 @@
+import { asCutoffPair } from './categories';
 import { BudgetSnapshot, LiabilityItem } from '../models/budget.model';
 
 export interface FinanceExport {
@@ -110,6 +111,7 @@ function snapshotFromFinanceFile(record: Record<string, unknown>): BudgetSnapsho
     cashEnabled: Boolean(record['cashEnabled']),
     transactions: asTransactions(record['transactions']),
     incomeReceipts: asIncomeReceipts(record['incomeReceipts']),
+    cutoffPair: asCutoffPair(record['cutoffPair']),
   };
 }
 
@@ -138,6 +140,7 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
         cashEnabled: Boolean(nested.cashEnabled || fromFile.cashEnabled),
         transactions: nested.transactions?.length ? nested.transactions : fromFile.transactions,
         incomeReceipts: nested.incomeReceipts?.length ? nested.incomeReceipts : fromFile.incomeReceipts,
+        cutoffPair: nested.cutoffPair ?? fromFile.cutoffPair,
       };
     }
     return fromFile ?? nested;
@@ -160,5 +163,6 @@ export function snapshotFromImport(value: unknown): BudgetSnapshot | null {
     cashEnabled: Boolean(record['cashEnabled']),
     transactions: asTransactions(record['transactions']),
     incomeReceipts: asIncomeReceipts(record['incomeReceipts']),
+    cutoffPair: asCutoffPair(record['cutoffPair']),
   };
 }

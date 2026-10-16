@@ -278,6 +278,8 @@ export interface BudgetSnapshot {
   incomeReceipts?: IncomeReceipt[];
   hideDebtTotal?: boolean;
   hideSavingsTotal?: boolean;
+  /** Payday pair used for income, bills, and Payments: 10th & 25th or 15th & 30th. */
+  cutoffPair?: CutoffPair;
   revision?: number;
 }
 

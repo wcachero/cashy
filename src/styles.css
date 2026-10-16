@@ -23,13 +23,26 @@ body {
   overflow-x: hidden;
 }
 
+html.modal-open,
+html.modal-open body {
+  overflow: hidden;
+}
+
 /* iOS Safari zooms the page when a focused field is under 16px and leaves it zoomed. */
 @media (max-width: 639px) {
   input,
   select,
   textarea {
-    font-size: 16px;
+    font-size: 16px !important;
+    line-height: 1.25;
   }
+}
+
+input[type='date'],
+input[type='datetime-local'] {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 input[type='number']::-webkit-outer-spin-button,

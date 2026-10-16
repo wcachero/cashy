@@ -954,6 +954,7 @@ export function createSeedSnapshot(): BudgetSnapshot {
     notificationsEnabled: false,
     bankSavings: [],
     receivables: [landReceivable()],
+    cutoffPair: '10_25',
   };
 }
 

@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { CATEGORY_META, cutoffDays, defaultCutoff, isPairCutoff } from '../core/categories';
+import { CATEGORY_META, asCutoffPair, cutoffDays, defaultCutoff, isPairCutoff } from '../core/categories';
 import { daysBetween, formatLongDate, formatMonthYear, formatShortDate, matchesCutoffDays, ordinalDay, parseIsoDate, shiftMonth, today, todayIso, toIso } from '../core/dates';
 import { snapshotFromImport } from '../core/finance-export';
 import { formatPhp, round2 } from '../core/money';
@@ -15,6 +15,7 @@ import {
   CASH_DEPOSIT_ID,
   BankSaving,
   BudgetSnapshot,
+  CutoffPair,
   CutoffAllocationItem,
   CutoffWithdrawal,
   DebtSlice,
@@ -96,6 +97,7 @@ export class BudgetStateService {
   readonly cashEnabled = signal(Boolean(this.seeded.cashEnabled));
   readonly transactions = signal<AccountTransaction[]>(this.seeded.transactions ?? []);
   readonly incomeReceipts = signal<IncomeReceipt[]>(this.seeded.incomeReceipts ?? []);
+  readonly cutoffPair = signal<CutoffPair>(asCutoffPair(this.seeded.cutoffPair));
   readonly loaded = signal(false);
   readonly saveError = signal('');
   private lastSettledOn = '';
@@ -386,6 +388,7 @@ export class BudgetStateService {
     this.cashEnabled.set(Boolean(snapshot.cashEnabled) || (snapshot.cashOnHand ?? 0) > 0);
     this.transactions.set(snapshot.transactions ?? []);
     this.incomeReceipts.set(snapshot.incomeReceipts ?? []);
+    this.cutoffPair.set(snapshot.cutoffPair ? asCutoffPair(snapshot.cutoffPair) : inferCutoffPair(snapshot));
     this.lastSettledOn = '';
     if (typeof snapshot.hideDebtTotal === 'boolean') this.hideDebtTotal.set(snapshot.hideDebtTotal);
     if (typeof snapshot.hideSavingsTotal === 'boolean') this.hideSavingsTotal.set(snapshot.hideSavingsTotal);
@@ -810,7 +813,7 @@ export class BudgetStateService {
   }
 
   addLiability(draft: LiabilityDraft): string | undefined {
-    const assignedCutoff = draft.assignedCutoff ?? defaultCutoff(draft.dueDayOfMonth);
+    const assignedCutoff = draft.assignedCutoff ?? defaultCutoff(draft.dueDayOfMonth, this.cutoffPair());
     const item: LiabilityItem = {
       id: crypto.randomUUID(),
       name: draft.name.trim(),
@@ -1176,6 +1179,11 @@ export class BudgetStateService {
     this.notificationsEnabled.set(enabled);
   }
 
+  setCutoffPair(pair: CutoffPair): void {
+    this.cutoffPair.set(asCutoffPair(pair));
+    this.ensureCurrentMonthCutoffs();
+  }
+
   toggleDebtHidden(): void {
     this.hideDebtTotal.update((hidden) => !hidden);
   }
@@ -1200,6 +1208,7 @@ export class BudgetStateService {
       cashEnabled: this.cashEnabled(),
       transactions: this.transactions(),
       incomeReceipts: this.incomeReceipts(),
+      cutoffPair: this.cutoffPair(),
       hideDebtTotal: this.hideDebtTotal(),
       hideSavingsTotal: this.hideSavingsTotal(),
       revision: this.revision,
@@ -2009,7 +2018,7 @@ export class BudgetStateService {
         adjustments: [],
         monthlyAmortization: yours,
         dueDayOfMonth: dueDay,
-        assignedCutoff: defaultCutoff(dueDay),
+        assignedCutoff: defaultCutoff(dueDay, this.cutoffPair()),
         remainingTerms: 1,
         originalTerms: 1,
         startDate: expense.expenseDate,
@@ -2030,7 +2039,7 @@ export class BudgetStateService {
                 bankName: expense.name,
                 monthlyAmortization: yours,
                 dueDayOfMonth: dueDay,
-                assignedCutoff: defaultCutoff(dueDay),
+                assignedCutoff: defaultCutoff(dueDay, this.cutoffPair()),
                 startDate: expense.expenseDate,
                 endDate: expense.expenseDate,
                 notes,
@@ -2349,6 +2358,15 @@ function cycleMatchesSalaryDay(iso: string, day: number): boolean {
 function nextDayOnOrAfter(anchor: string, day: number): string {
   const sameMonth = shiftMonth(anchor, 0, day);
   return sameMonth >= anchor ? sameMonth : shiftMonth(anchor, 1, day);
+}
+
+function inferCutoffPair(snapshot: BudgetSnapshot): CutoffPair {
+  const dates = [...(snapshot.incomeReceipts ?? []).map((item) => item.cutoffDate), ...snapshot.paycheckCycles.map((cycle) => cycle.cutoffDate)].filter(Boolean);
+  const latest = dates.sort().at(-1);
+  if (latest && matchesCutoffDays(latest, [15, 30]) && !matchesCutoffDays(latest, [10, 25])) return '15_30';
+  const salaryDays = snapshot.incomeStreams.map((stream) => stream.dayOfMonth);
+  if (salaryDays.some((day) => day === 15 || day === 30) && !salaryDays.some((day) => day === 10 || day === 25)) return '15_30';
+  return '10_25';
 }
 
 function salaryCutoffDates(day: number, cycles: PaycheckCycle[], today: string): string[] {

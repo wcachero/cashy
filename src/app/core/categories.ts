@@ -1,4 +1,5 @@
 import { AssignedCutoff, CutoffPair, ItemStatus, LiabilityCategory } from '../models/budget.model';
+import { shiftMonth } from './dates';
 
 export interface CategoryMeta {
   label: string;
@@ -89,8 +90,36 @@ export function pairLabel(pair: CutoffPair): string {
   return pair === '15_30' ? '15th and 30th' : '10th and 25th';
 }
 
-/** Bills due on the 11th–24th are funded by the 10th salary. Everything else waits for the 25th. */
-export function defaultCutoff(dueDayOfMonth: number): AssignedCutoff {
-  if (dueDayOfMonth >= 11 && dueDayOfMonth <= 24) return '10TH_CUTOFF';
+export function asCutoffPair(value: unknown): CutoffPair {
+  return value === '15_30' ? '15_30' : '10_25';
+}
+
+/** Which payday in the pair funds a due day. */
+export function cutoffFromDueDay(dueDayOfMonth: number, pair: CutoffPair = '10_25'): AssignedCutoff {
+  const day = Math.min(31, Math.max(1, Math.round(dueDayOfMonth)));
+  if (pair === '15_30') {
+    if (day >= 16 && day <= 29) return '15TH_CUTOFF';
+    return '30TH_CUTOFF';
+  }
+  if (day >= 11 && day <= 24) return '10TH_CUTOFF';
   return '25TH_CUTOFF';
+}
+
+/** Bills due on the 11th–24th are funded by the 10th salary. Everything else waits for the 25th. */
+export function defaultCutoff(dueDayOfMonth: number, pair: CutoffPair = '10_25'): AssignedCutoff {
+  return cutoffFromDueDay(dueDayOfMonth, pair);
+}
+
+/** Cutoff date that pays a due date in the active pair. */
+export function fundingCutoffDate(dueIso: string, pair: CutoffPair): { cutoff: AssignedCutoff; cutoffDate: string } {
+  const day = Number(dueIso.slice(8, 10)) || 1;
+  const cutoff = cutoffFromDueDay(day, pair);
+  if (pair === '15_30') {
+    if (day >= 16 && day <= 29) return { cutoff, cutoffDate: shiftMonth(dueIso, 0, 15) };
+    if (day >= 30) return { cutoff, cutoffDate: shiftMonth(dueIso, 0, 30) };
+    return { cutoff, cutoffDate: shiftMonth(dueIso, -1, 30) };
+  }
+  if (day >= 11 && day <= 24) return { cutoff, cutoffDate: shiftMonth(dueIso, 0, 10) };
+  if (day >= 25) return { cutoff, cutoffDate: shiftMonth(dueIso, 0, 25) };
+  return { cutoff, cutoffDate: shiftMonth(dueIso, -1, 25) };
 }
